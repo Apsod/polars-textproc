@@ -8,11 +8,11 @@ name = "ccstuff"
 crate-type= ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }
-pyo3-polars = { version = "0.19.0", features = ["derive", "dtype-array"] }
+pyo3 = { version = "0.23.4", features = ["extension-module", "abi3-py38"] }
+pyo3-polars = { version = "0.20.0", features = ["derive", "dtype-array"] }
 serde = { version = "1", features = ["derive"] }
-polars = { version = "0.45.1", features = ["dtype-struct", "dtype-array"], default-features = false }
-polars-arrow = { version = "0.45.1" }
+polars = { version = "0.46.0", features = ["dtype-struct", "dtype-array"], default-features = false }
+polars-arrow = { version = "0.46.0" }
 regex = { version = "1.11.1" }
 fasttext = { version = "0.7.8" }
 cached = { version = "0.54.0" }
