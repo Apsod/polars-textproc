@@ -136,9 +136,9 @@ fn repetition_signals(inputs: &[Series]) -> PolarsResult<Series> {
         ).map(|x| x.into_series())
 }
 
-// ######################################
-// Language identification using fasttext
-// ######################################
+// #################
+// Fasttext labeling
+// #################
 
 #[cached(time=60, time_refresh=true, sync_writes = true)]
 fn load_model(path: String) -> Result<Arc<FastText>, String> {
@@ -169,14 +169,12 @@ impl FasttextModel {
 
     fn predict(self: &Self, txt: &str) -> Result<Vec<f32>, String> {
         let preds = self.model.predict(txt, -1, 0.0)?;
-        let mut ret : Vec<f32> = vec![0.0; self.labels.len()];
+        let mut ret : Vec<f32> = vec![0.0; self.len()];
+        
+        preds.into_iter().for_each(|p| {
+            self.labels.get(&p.label).map(|i| ret[*i] = p.prob);
+        });
 
-        for p in preds.into_iter() {
-            match self.labels.get(&p.label) {
-                Some(i) => ret[*i] = p.prob,
-                None => (),
-            }
-        }
         Ok(ret)
     }
 }
@@ -215,10 +213,7 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     validities.extend_constant(ca.len(), true);
 
     let n = model.len();
-    let mut ret : Vec<Vec<f32>> = Vec::new();
-    for _ in 0..n {
-        ret.push(Vec::with_capacity(ca.len()));
-    }
+    let mut ret : Vec<Vec<f32>> = vec![Vec::with_capacity(ca.len()); n];
 
     let space_pattern = Regex::new(r"\s+").unwrap();
 
