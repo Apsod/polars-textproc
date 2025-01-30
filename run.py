@@ -1,13 +1,14 @@
 
 from functools import cache
 from collections import Counter
+
 from itertools import tee, islice
 
 import re
 
 import polars as pl
 import collections
-from ccstuff import repetition_signals
+from ccstuff import repetition_signals, fasttext
 
 def ngrams(xs, n):
     iterables = tee(xs, n)
@@ -63,26 +64,31 @@ def all_signals(txt):
 #print(r)
 #print(p)
 
-txts = pl.scan_parquet('/home/amaru/Downloads/000_00000.parquet').select('text').head(100_000).collect()
-
+HEAD = 10_000
 import time
-
 duration = -time.perf_counter()
-for txt in txts['text']:
-    s = ngram_duplicates(txt,10)
+lf = pl.scan_parquet('/home/amaru/Downloads/000_00000.parquet')
+#rep = lf.with_columns(repetition=repetition_signals("text"))
+#lid = lf.with_columns(langid=langid("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
+lf = lf.with_columns(langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
+lf = lf.with_columns(repetition=repetition_signals("text"))
+r, p = lf.head(HEAD).profile() #.unnest('langid').unnest('repetition').filter(pl.col('dup_5_gram_char_ratio') == 0.0).sink_parquet('dump.parquet')
 duration += time.perf_counter()
-print(duration)
+print('rust:  ', duration)
+print(r)
+print(p)
+#print(pl.read_parquet('dump.parquet'))
+#print(both.head(HEAD).filter(pl.col('langid').struct.field('total_prob') > .90).head(10).collect())
+#for txt in txts['text']:
+#    s = ngram_all(re.split(r'\s+', txt))
+#print('python:', duration)
+#print(s)
 
-duration = -time.perf_counter()
-signals = txts.with_columns(repetition=repetition_signals("text"))#.write_parquet('dump.parquet')
-duration += time.perf_counter()
-print(duration)
-
-
-#result = lf.with_columns(repetition=repetition_signals("text")).collect()
-#print(result)
 #for i in range(100):
-#    print('rust', result['repetition'][i])
-#    txt = result['text'][i]
-#    print('pyth', all_signals(txt))
+#    print(signals['langid'][i])
+#    print('rust', list(signals['repetition'][i].values()))
+#    txt = signals['text'][i]
+#    print('pyth', ngram_all(re.split(r'\s+', txt)))
+#    print('pyth', list(all_signals(txt).values()))
 #    print()
+#

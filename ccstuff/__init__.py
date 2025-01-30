@@ -22,3 +22,11 @@ def repetition_signals(expr: IntoExprColumn) -> pl.Expr:
         is_elementwise=True,
     )
 
+def fasttext(expr: IntoExprColumn, *, path: str, labels: [str]) -> pl.Expr:
+    return register_plugin_function(
+        args=[expr],
+        plugin_path=LIB,
+        function_name="fasttext",
+        is_elementwise=True,
+        kwargs={'path': path, 'labels': labels},
+    )
