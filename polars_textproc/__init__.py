@@ -9,7 +9,7 @@ from polars.plugins import register_plugin_function
 from polars_textproc._internal import __version__ as __version__
 
 if TYPE_CHECKING:
-    from ccstuff.typing import IntoExprColumn
+    from polars_textproc.typing import IntoExprColumn
 
 LIB = Path(__file__).parent
 
