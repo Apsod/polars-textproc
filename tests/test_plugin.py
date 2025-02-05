@@ -2,9 +2,8 @@
 def test_plugin():
     import polars as pl
     import polars.selectors as cs
-    from polars_textproc import repetition_signals, fasttext
+    from polars_textproc import repetition_signals
 
-    HEAD = 10_000
     english = """
     English is a West Germanic language in the Indo-European language family, whose speakers, called Anglophones, originated in early medieval England on the island of Great Britain.[4][5][6] The namesake of the language is the Angles, one of the Germanic peoples that migrated to Britain after its Roman occupiers left. English is the most spoken language in the world, primarily due to the global influences of the former British Empire (succeeded by the Commonwealth of Nations) and the United States.[7] English is the third-most spoken native language, after Mandarin Chinese and Spanish;[8] it is also the most widely learned second language in the world, with more second-language speakers than native speakers.
 
