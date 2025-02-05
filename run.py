@@ -8,7 +8,7 @@ import re
 
 import polars as pl
 import collections
-from ccstuff import repetition_signals, fasttext
+from polars_textproc import repetition_signals, fasttext
 
 HEAD = 10_000
 english = """

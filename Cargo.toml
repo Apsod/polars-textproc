@@ -1,10 +1,10 @@
 [package]
-name = "ccstuff"
+name = "polars_textproc"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "ccstuff"
+name = "polars_textproc"
 crate-type= ["cdylib"]
 
 [dependencies]

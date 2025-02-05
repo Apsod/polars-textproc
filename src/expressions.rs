@@ -2,17 +2,14 @@
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
 use polars_arrow::bitmap::{Bitmap, MutableBitmap};
-use std::collections::{HashSet, HashMap, VecDeque};
+use std::collections::{HashSet, HashMap};
 use regex::Regex;
 use fasttext::{FastText};
 use cached::proc_macro::cached;
 use serde::Deserialize;
 use std::sync::Arc;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 use std::io::{Error, ErrorKind};
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 // #########################
 // GOPHER repetition signals
