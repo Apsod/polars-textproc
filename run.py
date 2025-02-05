@@ -1,13 +1,4 @@
-
-from functools import cache
-from collections import Counter
-
-from itertools import tee, islice
-
-import re
-
 import polars as pl
-import collections
 from polars_textproc import repetition_signals, fasttext
 
 HEAD = 10_000
