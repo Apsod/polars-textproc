@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 import polars as pl
 from polars.plugins import register_plugin_function
@@ -22,7 +22,7 @@ def repetition_signals(expr: IntoExprColumn) -> pl.Expr:
         is_elementwise=True,
     )
 
-def fasttext(expr: IntoExprColumn, *, path: str, labels: [str]) -> pl.Expr:
+def fasttext(expr: IntoExprColumn, *, path: str, labels: List[str]) -> pl.Expr:
     return register_plugin_function(
         args=[expr],
         plugin_path=LIB,
