@@ -2,13 +2,17 @@
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
 use polars_arrow::bitmap::{Bitmap, MutableBitmap};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, VecDeque};
 use regex::Regex;
 use fasttext::{FastText};
 use cached::proc_macro::cached;
 use serde::Deserialize;
 use std::sync::Arc;
+use std::rc::Rc;
+use std::cell::RefCell;
+
 use std::io::{Error, ErrorKind};
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 // #########################
 // GOPHER repetition signals
@@ -28,7 +32,7 @@ fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N]
     // the probability of this is small for sequences of 
     // less than 2**32 tokens. 
     let mut seen : HashSet<String> = HashSet::new();
-    let mut counts : [HashMap<String, usize>; L] = core::array::from_fn(|_| HashMap::new());
+    let mut counts : HashMap<String, usize> = HashMap::new();
     // hashers and lens are "circular" buffers.
     let mut sbuf : [&str; N] = [""; N];
     let mut lbuf : [usize; N] = [0; N];
@@ -40,45 +44,41 @@ fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N]
 
     for (pos, v) in vals.enumerate() {
         let vlen = v.chars().count();
-        // n: saturated length of buffer.
-        // ix: current 0-index in buffer.
-        // Corresponds to the new unigram.
-        let n = std::cmp::min(N, pos+1);
-        let ix = pos % N;
+        let filled = std::cmp::min(N, pos+1);
+        let i = pos % N;
 
         tot += vlen;
-        lbuf[ix] = 0;
-        sbuf[ix] = v;
-
-        let mut s = String::with_capacity(vlen + n + lbuf[(ix + n - 1) % N]);
-        for i in 0..n {
-            // j : index corresponding to the i-gram.
-            // j = (ix - 1) % N
+        lbuf[i] = 0;
+        sbuf[i] = v;
+        
+        let mut s = String::with_capacity(vlen + filled + lbuf[(i + filled - 1) % N]);
+        // s : string buffer where we put the n-gram parts.
+        // n : zero-indexed n-gram, so n=0 ~ unigram, n=1 ~ bigrams, et.c.
+        // j : index corresponding to the current n-gram.
+        // j = (i - n) % N
+        for n in 0..filled {
             // the stuff below is due to underflow.
-            let j = (ix + i*(N-1)) % N;
+            let j = (i + n*(N-1)) % N;
 
             lbuf[j] += vlen;
             s.push_str(sbuf[j]);
+            let ngram = s.clone();
             s.push(' ');
 
-            if i < L {
-                *counts[i].entry(s.clone()).or_insert(0) += lbuf[j]; 
-            } else {
-                if ! seen.insert(s.clone()) {
-                    let unaccounted : usize = std::cmp::min(i, pos - last[i] - 1);
-                    dups[i] += lbuf[(ix + unaccounted*(N-1)) % N];
-                    last[i] = pos;
-                }
+            if n < L {
+                let v = counts.entry(ngram).or_insert(0);
+                *v += lbuf[j];
+                dups[n] = std::cmp::max(dups[n], *v);
+            } else if ! seen.insert(ngram) {
+                let unaccounted : usize = std::cmp::min(n, pos - last[n] - 1);
+                dups[n] += lbuf[(i + unaccounted*(N-1)) % N];
+                last[n] = pos;
             }
         }
     }
     
-    let counts = counts.map(|c| {c.into_values().max().unwrap_or(0)});
-
-    for i in 0..L {
-        dups[i] = counts[i];
-    }
-
+    let tot = std::cmp::max(1, tot); 
+    //let counts = counts.map(|c| {c.into_values().max().unwrap_or(0)});
     dups.map(|dup| ratio(dup, tot))
 }
 

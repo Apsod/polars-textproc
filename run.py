@@ -11,9 +11,6 @@ import collections
 from ccstuff import repetition_signals, fasttext
 
 HEAD = 10_000
-import time
-duration = -time.perf_counter()
-
 english = """
 English is a West Germanic language in the Indo-European language family, whose speakers, called Anglophones, originated in early medieval England on the island of Great Britain.[4][5][6] The namesake of the language is the Angles, one of the Germanic peoples that migrated to Britain after its Roman occupiers left. English is the most spoken language in the world, primarily due to the global influences of the former British Empire (succeeded by the Commonwealth of Nations) and the United States.[7] English is the third-most spoken native language, after Mandarin Chinese and Spanish;[8] it is also the most widely learned second language in the world, with more second-language speakers than native speakers.
 
@@ -45,30 +42,7 @@ print(df)
 
 lf = df.lazy()
 
+lf = lf.with_columns(repetition=repetition_signals("text"), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
+lf = lf.unnest('repetition').unnest('langid')
 
-lf = lf.with_columns(repetition=repetition_signals("text"))
-lf = lf.with_columns(langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
-print(lf.explain(streaming=True))
-res = lf.collect()
-#r, p = lf.head(HEAD).profile() #.unnest('langid').unnest('repetition').filter(pl.col('dup_5_gram_char_ratio') == 0.0).sink_parquet('dump.parquet')
-duration += time.perf_counter()
-print('rust:  ', duration)
-print(res.select('text', 'langid').unnest('langid'))
-print(res.select('text', 'repetition').unnest('repetition'))
-#print(r)
-#print(p)
-#print(pl.read_parquet('dump.parquet'))
-#print(both.head(HEAD).filter(pl.col('langid').struct.field('total_prob') > .90).head(10).collect())
-#for txt in txts['text']:
-#    s = ngram_all(re.split(r'\s+', txt))
-#print('python:', duration)
-#print(s)
-
-#for i in range(100):
-#    print(signals['langid'][i])
-#    print('rust', list(signals['repetition'][i].values()))
-#    txt = signals['text'][i]
-#    print('pyth', ngram_all(re.split(r'\s+', txt)))
-#    print('pyth', list(all_signals(txt).values()))
-#    print()
-#
+print(lf.collect())
