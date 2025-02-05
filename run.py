@@ -33,10 +33,9 @@ This is a very repetetive text that is very repetetive and a text
 """ * 10
 
 
-
-
 df = pl.DataFrame({
-    "text": [english, swedish, interlingua, repetetive], 
+    "text": [english, swedish, interlingua, None, repetetive], 
+    "num" : [1, 2, 3, 4, 5],
     })
 print(df)
 

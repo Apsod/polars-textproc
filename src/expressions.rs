@@ -84,16 +84,23 @@ fn fieldname(i: usize) -> String {
 }
 
 fn ngrammer_output(input_fields: &[Field]) -> PolarsResult<Field> {
-    let fields : [Field; N] = core::array::from_fn(|i| {
-        Field::new(
-            fieldname(i).into(),
-            DataType::Float32,
-            ) 
-    });
-    Ok(Field::new(
-            "repetition".into(), 
-            DataType::Struct(fields.into())
-            ))
+    let field = &input_fields[0];
+
+    match field.dtype() {
+        DataType::String => {
+            let fields : [Field; N] = core::array::from_fn(|i| {
+                Field::new(
+                    fieldname(i).into(),
+                    DataType::Float32,
+                    ) 
+            });
+            Ok(Field::new(
+                    "repetition".into(), 
+                    DataType::Struct(fields.into())
+                    ))
+        }
+        dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype)
+    }
 }
 
 #[polars_expr(output_type_func=ngrammer_output)]
@@ -113,9 +120,9 @@ fn repetition_signals(inputs: &[Series]) -> PolarsResult<Series> {
                 }
             }
             None => {
-                for i in 0..N {
-                    validities.set(row, false);
-                    res[i].push(0.0);
+                validities.set(row, false); 
+                for r in res.iter_mut(){
+                    r.push(0.0);
                 }
             }
         }
@@ -150,7 +157,7 @@ struct FasttextModel {
 }
 
 impl FasttextModel {
-    fn new(path: &str, labels: &Vec<String>) -> Result<Self, String> {
+    fn new(path: &str, labels: &[String]) -> Result<Self, String> {
         let m = load_model(path.into())?;
         Ok(
             Self {
@@ -160,16 +167,18 @@ impl FasttextModel {
         )
     }
 
-    fn len(self: &Self) -> usize {
+    fn len(&self) -> usize {
         self.labels.len()
     }
 
-    fn predict(self: &Self, txt: &str) -> Result<Vec<f32>, String> {
+    fn predict(&self, txt: &str) -> Result<Vec<f32>, String> {
         let preds = self.model.predict(txt, -1, 0.0)?;
         let mut ret : Vec<f32> = vec![0.0; self.len()];
         
         preds.into_iter().for_each(|p| {
-            self.labels.get(&p.label).map(|i| ret[*i] = p.prob);
+            if let Some(i) = self.labels.get(&p.label) {
+                ret[*i] = p.prob;
+            }
         });
 
         Ok(ret)
@@ -178,14 +187,20 @@ impl FasttextModel {
 
 
 fn fasttext_output(input_fields: &[Field], kwargs: FasttextKwargs) -> PolarsResult<Field> {
-    Ok(
-        Field::new(
-            "langid".into(),
-            DataType::Struct(
-                kwargs.labels.iter().map(|l| Field::new(l.into(), DataType::Float32)).collect::<Vec<_>>()
+    let field = &input_fields[0];
+    match field.dtype() {
+        DataType::String => {
+            Ok(
+                Field::new(
+                    "langid".into(),
+                    DataType::Struct(
+                        kwargs.labels.iter().map(|l| Field::new(l.into(), DataType::Float32)).collect::<Vec<_>>()
+                    )
+                )
             )
-        )
-    )
+        }
+        dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype)
+    }
 }
 
 
@@ -217,15 +232,15 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     ca.iter().enumerate().for_each(|(row, v)| {
         match v.and_then(|txt| model.predict(&space_pattern.replace_all(txt, " ")).ok()) {
             Some(scores) => {
-                for i in 0..n {
-                    ret[i].push(scores[i]);
-                }
+                ret.iter_mut().zip(scores).for_each(|(r, s)| {
+                    r.push(s); 
+                });
             },
             None => {
                 validities.set(row, false);
-                for i in 0..n {
-                    ret[i].push(0.0);
-                }
+                ret.iter_mut().for_each(|r| {
+                    r.push(0.0);
+                });
             }
         }
     });
