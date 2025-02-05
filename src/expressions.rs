@@ -114,16 +114,12 @@ fn repetition_signals(inputs: &[Series]) -> PolarsResult<Series> {
     
     ca.iter().enumerate().for_each(|(row, v)| {
         match v.map(|txt| dup_ngrams_str(wordsplit.split(txt))) {
-            Some(r) => {
-                for (i, s) in r.into_iter().enumerate() {
-                    res[i].push(s);
-                }
+            Some(signals) => {
+                res.iter_mut().zip(signals).for_each(|(r, s)| r.push(s));
             }
             None => {
                 validities.set(row, false); 
-                for r in res.iter_mut(){
-                    r.push(0.0);
-                }
+                res.iter_mut().for_each(|r| r.push(0.0));
             }
         }
     });
@@ -211,7 +207,7 @@ struct FasttextKwargs{
 }
 
 impl FasttextKwargs {
-    fn load(self: &Self) -> Result<FasttextModel, Error> {
+    fn load(&self) -> Result<FasttextModel, Error> {
         FasttextModel::new(&self.path, &self.labels).map_err(|e| std::io::Error::new(ErrorKind::Other, e))
     }
 }
@@ -225,20 +221,20 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     validities.extend_constant(ca.len(), true);
 
     let n = model.len();
-    let mut ret : Vec<Vec<f32>> = vec![Vec::with_capacity(ca.len()); n];
+    let mut res : Vec<Vec<f32>> = vec![Vec::with_capacity(ca.len()); n];
 
     let space_pattern = Regex::new(r"\s+").unwrap();
 
     ca.iter().enumerate().for_each(|(row, v)| {
         match v.and_then(|txt| model.predict(&space_pattern.replace_all(txt, " ")).ok()) {
             Some(scores) => {
-                ret.iter_mut().zip(scores).for_each(|(r, s)| {
+                res.iter_mut().zip(scores).for_each(|(r, s)| {
                     r.push(s); 
                 });
             },
             None => {
                 validities.set(row, false);
-                ret.iter_mut().for_each(|r| {
+                res.iter_mut().for_each(|r| {
                     r.push(0.0);
                 });
             }
@@ -246,7 +242,7 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     });
 
     let validities : Bitmap = validities.into();
-    let res : Vec<Series> = ret.into_iter().enumerate().map(|(i, v)| {
+    let res : Vec<Series> = res.into_iter().enumerate().map(|(i, v)| {
         ChunkedArray::<Float32Type>::from_vec_validity(kwargs.labels[i].clone().into(), v, Some(validities.clone())).into_series()
     }).collect();
 
