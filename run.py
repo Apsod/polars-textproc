@@ -33,6 +33,7 @@ print(df)
 lf = df.lazy()
 
 lf = lf.with_columns(repetition=repetition_signals("text"), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
-lf = lf.unnest('repetition').unnest('langid')
+lf = lf.with_columns(pl.col('langid').struct.field('top_label', 'top_score')).drop('langid')
 
+print(lf.explain(streaming=True))
 print(lf.collect())

@@ -24,17 +24,18 @@ fn ratio(num: usize, den:usize) -> f32 {
 
 fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N] 
 {
-    // Counts duplicate and top ngrams using hashing. 
-    // Hash collisions will lead to overestimates, but
-    // the probability of this is small for sequences of 
-    // less than 2**32 tokens. 
+    // Counts duplicate and top ngrams, avoiding overlap for duplicate ngrams. 
     let mut seen : HashSet<String> = HashSet::new();
     let mut counts : HashMap<String, usize> = HashMap::new();
-    // hashers and lens are "circular" buffers.
+    //sbuf and lbuf are circular buffers
+    //sbuf tracks the last N seen tokens
+    //lbuf tracks the cumulative length of the last N seen tokens.
     let mut sbuf : [&str; N] = [""; N];
     let mut lbuf : [usize; N] = [0; N];
-    // last[i] is the leftmost position of the last duplicate i-gram. Used to not over
-    // lbs, dups and tot count the total number of characters. 
+    // last[n] is the leftmost position of the last duplicate "n"-gram.
+    // It is used to avoid double counting overlapping duplicates.
+    // dups[n] counts the number of characters covered by duplicate "n"-grams.
+    // tot is the total number of characters seen.
     let mut last : [usize; N] = [0; N];
     let mut dups : [usize; N] = [0; N];
     let mut tot: usize = 0;
@@ -50,11 +51,20 @@ fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N]
         
         let mut s = String::with_capacity(vlen + filled + lbuf[(i + filled - 1) % N]);
         // s : string buffer where we put the n-gram parts.
-        // n : zero-indexed n-gram, so n=0 ~ unigram, n=1 ~ bigrams, et.c.
-        // j : index corresponding to the current n-gram.
-        // j = (i - n) % N
+        // n : zero-indexed n-gram "n", so n=0 ~ unigram, n=1 ~ bigrams, et.c.
+        // j : index corresponding to the current n-gram in the circular buffers lbuf, sbuf.
+        // The ngram is built up in reverse, iterating over the circular buffer:
+        // Say we've seen [the, cat, sat, on, the], and the current word is "mat", for N=4, L=2.
+        // pos = 5
+        // i = 1
+        // sbuf = [the, mat, sat, on]
+        // n = 0: j = 1, lbuf[1] =  3, ngram = "mat"
+        // n = 1: j = 0, lbuf[0] =  6, ngram = "mat the"
+        // n = 2: j = 3, lbuf[3] =  8, ngram = "mat the on"
+        // n = 3: j = 2, lbuf[2] = 11, ngram = "mat the on sat"
         for n in 0..filled {
-            // the stuff below is due to underflow.
+            // this corresponds to j = (i - n) % N.
+            // the formulation below is to avoid underflow.
             let j = (i + n*(N-1)) % N;
 
             lbuf[j] += vlen;
@@ -63,10 +73,20 @@ fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N]
             s.push(' ');
 
             if n < L {
+                // top-ngram
+                // Increment counts[ngram] by the ngram length, 
+                // And set dups[n] to counts[ngram] if it's larger
+                // than the current dups[n].
                 let v = counts.entry(ngram).or_insert(0);
                 *v += lbuf[j];
                 dups[n] = std::cmp::max(dups[n], *v);
             } else if ! seen.insert(ngram) {
+                // dup-ngram
+                // last[n] is the position where a duplicate "n"-gram was last observed.
+                // unaccounted is the number of n-gram parts (-1) that should be accounted for
+                // when updating the number of characters covered by duplicate "n"-grams.
+                // lbuf[(i - unaccounted) % N] corresponds the the cumulative length of
+                // the (unaccounted + 1) most recent tokens.
                 let unaccounted : usize = std::cmp::min(n, pos - last[n] - 1);
                 dups[n] += lbuf[(i + unaccounted*(N-1)) % N];
                 last[n] = pos;
@@ -74,8 +94,9 @@ fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N]
         }
     }
     
+    // Hack to deal with division by zero.
+    // tot = 0 => all dups = 0.
     let tot = std::cmp::max(1, tot); 
-    //let counts = counts.map(|c| {c.into_values().max().unwrap_or(0)});
     dups.map(|dup| ratio(dup, tot))
 }
 
@@ -149,7 +170,14 @@ fn load_model(path: String) -> Result<Arc<FastText>, String> {
 
 struct FasttextModel {
     model : Arc<FastText>,
-    labels : HashMap<String, usize>, 
+    labelmap : HashMap<String, usize>, 
+}
+
+struct FasttextOutput {
+    top_label: u32,
+    top_score: f32,
+    total_score: f32,
+    scores: Vec<f32>
 }
 
 impl FasttextModel {
@@ -158,39 +186,56 @@ impl FasttextModel {
         Ok(
             Self {
                 model: m,
-                labels: HashMap::from_iter(labels.iter().enumerate().map(|(i,s)| (s.clone(), i)))
+                labelmap: HashMap::from_iter(labels.iter().enumerate().map(|(i,s)| (s.clone(), i))),
             }
         )
     }
 
     fn len(&self) -> usize {
-        self.labels.len()
+        self.labelmap.len()
     }
 
-    fn predict(&self, txt: &str) -> Result<Vec<f32>, String> {
+    fn predict(&self, txt: &str) -> Result<FasttextOutput, String> {
         let preds = self.model.predict(txt, -1, 0.0)?;
-        let mut ret : Vec<f32> = vec![0.0; self.len()];
+        let mut scores : Vec<f32> = vec![0.0; self.len()];
+        let mut top_label = 0;
+        let mut top_score = 0.0;
+        let mut total_score = 0.0;
         
         preds.into_iter().for_each(|p| {
-            if let Some(i) = self.labels.get(&p.label) {
-                ret[*i] = p.prob;
+            if let Some(i) = self.labelmap.get(&p.label) {
+                let i = *i;
+                scores[i] = p.prob;
+                total_score += p.prob;
+                if p.prob > top_score {
+                    top_label = i as u32;
+                    top_score = p.prob;
+                }
             }
         });
-
-        Ok(ret)
+        Ok(FasttextOutput { top_label: top_label, top_score: top_score, total_score: total_score, scores: scores })
     }
 }
 
-
 fn fasttext_output(input_fields: &[Field], kwargs: FasttextKwargs) -> PolarsResult<Field> {
     let field = &input_fields[0];
+    let mut fields = vec![
+        Field::new("top_label".into(), DataType::String),
+        Field::new("top_score".into(), DataType::Float32),
+        Field::new("total_score".into(), DataType::Float32),
+    ];
+    
+    for label in kwargs.labels {
+        fields.push(Field::new(label.into(), DataType::Float32));
+    }
+
     match field.dtype() {
         DataType::String => {
             Ok(
                 Field::new(
                     "langid".into(),
                     DataType::Struct(
-                        kwargs.labels.iter().map(|l| Field::new(l.into(), DataType::Float32)).collect::<Vec<_>>()
+                        fields
                     )
                 )
             )
@@ -198,7 +243,6 @@ fn fasttext_output(input_fields: &[Field], kwargs: FasttextKwargs) -> PolarsResu
         dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype)
     }
 }
-
 
 #[derive(Deserialize)]
 struct FasttextKwargs{
@@ -216,25 +260,35 @@ impl FasttextKwargs {
 fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     let ca: &StringChunked = inputs[0].str()?;
     let model = kwargs.load()?;
+    let l = ca.len();
+    let n = model.len();
     
-    let mut validities = MutableBitmap::with_capacity(ca.len());
+    let mut validities = MutableBitmap::with_capacity(l);
     validities.extend_constant(ca.len(), true);
 
-    let n = model.len();
-    let mut res : Vec<Vec<f32>> = vec![Vec::with_capacity(ca.len()); n];
+    let mut top_labels : Vec<u32> = Vec::with_capacity(l); 
+    let mut top_scores : Vec<f32> = Vec::with_capacity(l); 
+    let mut total_scores : Vec<f32> = Vec::with_capacity(l); 
+    let mut label_scores : Vec<Vec<f32>> = vec![Vec::with_capacity(l); n];
 
     let space_pattern = Regex::new(r"\s+").unwrap();
 
     ca.iter().enumerate().for_each(|(row, v)| {
         match v.and_then(|txt| model.predict(&space_pattern.replace_all(txt, " ")).ok()) {
-            Some(scores) => {
-                res.iter_mut().zip(scores).for_each(|(r, s)| {
+            Some(output) => {
+                top_labels.push(output.top_label);
+                top_scores.push(output.top_score);
+                total_scores.push(output.total_score);
+                label_scores.iter_mut().zip(output.scores).for_each(|(r, s)| {
                     r.push(s); 
                 });
             },
             None => {
                 validities.set(row, false);
-                res.iter_mut().for_each(|r| {
+                top_labels.push(0);
+                top_scores.push(0.0);
+                total_scores.push(0.0);
+                label_scores.iter_mut().for_each(|r| {
                     r.push(0.0);
                 });
             }
@@ -242,9 +296,25 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     });
 
     let validities : Bitmap = validities.into();
-    let res : Vec<Series> = res.into_iter().enumerate().map(|(i, v)| {
-        ChunkedArray::<Float32Type>::from_vec_validity(kwargs.labels[i].clone().into(), v, Some(validities.clone())).into_series()
-    }).collect();
+    let mut res : Vec<Series> = Vec::new();
+    res.push(
+        ChunkedArray::<UInt32Type>::from_vec_validity("top_label".into(), top_labels, Some(validities.clone())).apply_into_string_amortized(
+            | index: u32, output: &mut String | {
+                output.push_str(&kwargs.labels[index as usize]);
+            }
+        ).into_series()
+    );
+    res.push(
+        ChunkedArray::<Float32Type>::from_vec_validity("top_score".into(), top_scores, Some(validities.clone())).into_series()
+    );
+    res.push(
+        ChunkedArray::<Float32Type>::from_vec_validity("total_score".into(), total_scores, Some(validities.clone())).into_series()
+    );
+    for (i, label_score) in label_scores.into_iter().enumerate() {
+        res.push(
+            ChunkedArray::<Float32Type>::from_vec_validity(kwargs.labels[i].clone().into(), label_score, Some(validities.clone())).into_series()
+        )
+    }
 
     StructChunked::from_series(
         inputs[0].name().clone(),
