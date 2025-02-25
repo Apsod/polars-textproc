@@ -219,15 +219,20 @@ impl FasttextModel {
 
 fn fasttext_output(input_fields: &[Field], kwargs: FasttextKwargs) -> PolarsResult<Field> {
     let field = &input_fields[0];
-    let mut fields = vec![
-        Field::new("top_label".into(), DataType::String),
-        Field::new("top_score".into(), DataType::Float32),
-        Field::new("total_score".into(), DataType::Float32),
-    ];
-    
-    for label in kwargs.labels {
-        fields.push(Field::new(label.into(), DataType::Float32));
+
+    let mut fields = Vec::new();
+
+    if kwargs.output_aggregate {
+        fields.push(Field::new("top_label".into(), DataType::String));
+        fields.push(Field::new("top_score".into(), DataType::Float32));
+        fields.push(Field::new("total_score".into(), DataType::Float32));
     }
+    if kwargs.output_scores {
+        for label in kwargs.labels {
+            fields.push(Field::new(label.into(), DataType::Float32));
+        }
+    }
+    
 
     match field.dtype() {
         DataType::String => {
@@ -248,6 +253,8 @@ fn fasttext_output(input_fields: &[Field], kwargs: FasttextKwargs) -> PolarsResu
 struct FasttextKwargs{
     path: String,
     labels: Vec<String>,
+    output_aggregate: bool,
+    output_scores: bool,
 }
 
 impl FasttextKwargs {
@@ -266,54 +273,79 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     let mut validities = MutableBitmap::with_capacity(l);
     validities.extend_constant(ca.len(), true);
 
-    let mut top_labels : Vec<u32> = Vec::with_capacity(l); 
-    let mut top_scores : Vec<f32> = Vec::with_capacity(l); 
-    let mut total_scores : Vec<f32> = Vec::with_capacity(l); 
-    let mut label_scores : Vec<Vec<f32>> = vec![Vec::with_capacity(l); n];
+    let mut top_label : Vec<u32> = Vec::new(); 
+    let mut top_score : Vec<f32> = Vec::new();
+    let mut total_score : Vec<f32> = Vec::new();
+    let mut label_scores : Vec<Vec<f32>> = Vec::new();
+    
+    if kwargs.output_aggregate {
+        top_label.reserve_exact(l);
+        top_score.reserve_exact(l);
+        total_score.reserve_exact(l);
+    }
+
+    if kwargs.output_scores {
+        for _ in 0..n {
+            label_scores.push(Vec::with_capacity(l));
+        }
+    }
 
     let space_pattern = Regex::new(r"\s+").unwrap();
 
     ca.iter().enumerate().for_each(|(row, v)| {
         match v.and_then(|txt| model.predict(&space_pattern.replace_all(txt, " ")).ok()) {
             Some(output) => {
-                top_labels.push(output.top_label);
-                top_scores.push(output.top_score);
-                total_scores.push(output.total_score);
-                label_scores.iter_mut().zip(output.scores).for_each(|(r, s)| {
-                    r.push(s); 
-                });
+                if kwargs.output_aggregate {
+                    top_label.push(output.top_label);
+                    top_score.push(output.top_score);
+                    total_score.push(output.total_score);
+                }
+                if kwargs.output_scores {
+                    label_scores.iter_mut().zip(output.scores).for_each(|(r, s)| {
+                        r.push(s); 
+                    });
+                }
             },
             None => {
                 validities.set(row, false);
-                top_labels.push(0);
-                top_scores.push(0.0);
-                total_scores.push(0.0);
-                label_scores.iter_mut().for_each(|r| {
-                    r.push(0.0);
-                });
+                if kwargs.output_aggregate {
+                    top_label.push(0);
+                    top_score.push(0.0);
+                    total_score.push(0.0);
+                }
+                if kwargs.output_scores {
+                    label_scores.iter_mut().for_each(|r| {
+                        r.push(0.0);
+                    });
+                }
             }
         }
     });
 
     let validities : Bitmap = validities.into();
     let mut res : Vec<Series> = Vec::new();
-    res.push(
-        ChunkedArray::<UInt32Type>::from_vec_validity("top_label".into(), top_labels, Some(validities.clone())).apply_into_string_amortized(
-            | index: u32, output: &mut String | {
-                output.push_str(&kwargs.labels[index as usize]);
-            }
-        ).into_series()
-    );
-    res.push(
-        ChunkedArray::<Float32Type>::from_vec_validity("top_score".into(), top_scores, Some(validities.clone())).into_series()
-    );
-    res.push(
-        ChunkedArray::<Float32Type>::from_vec_validity("total_score".into(), total_scores, Some(validities.clone())).into_series()
-    );
-    for (i, label_score) in label_scores.into_iter().enumerate() {
+
+    if kwargs.output_aggregate {
         res.push(
-            ChunkedArray::<Float32Type>::from_vec_validity(kwargs.labels[i].clone().into(), label_score, Some(validities.clone())).into_series()
-        )
+            ChunkedArray::<UInt32Type>::from_vec_validity("top_label".into(), top_label, Some(validities.clone())).apply_into_string_amortized(
+                | index: u32, output: &mut String | {
+                    output.push_str(&kwargs.labels[index as usize]);
+                }
+            ).into_series()
+        );
+        res.push(
+            ChunkedArray::<Float32Type>::from_vec_validity("top_score".into(), top_score, Some(validities.clone())).into_series()
+        );
+        res.push(
+            ChunkedArray::<Float32Type>::from_vec_validity("total_score".into(), total_score, Some(validities.clone())).into_series()
+        );
+    }
+    if kwargs.output_scores {
+        for (i, label_score) in label_scores.into_iter().enumerate() {
+            res.push(
+                ChunkedArray::<Float32Type>::from_vec_validity(kwargs.labels[i].clone().into(), label_score, Some(validities.clone())).into_series()
+            )
+        }
     }
 
     StructChunked::from_series(
