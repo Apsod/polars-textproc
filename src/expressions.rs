@@ -213,7 +213,7 @@ impl FasttextModel {
                 }
             }
         });
-        Ok(FasttextOutput { top_label: top_label, top_score: top_score, total_score: total_score, scores: scores })
+        Ok(FasttextOutput { top_label, top_score, total_score, scores })
     }
 }
 
