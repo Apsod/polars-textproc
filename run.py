@@ -31,11 +31,12 @@ df = pl.DataFrame({
     "text": [english, swedish, interlingua, None, repetetive], 
     "num" : [1, 2, 3, 4, 5],
     })
+
 print(df)
 
 lf = df.lazy()
 
-lf = lf.with_columns(repetition=repetition_signals("text"), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
+lf = lf.with_columns(repetition=repetition_signals("text", tokenizer_pattern=r'.'), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
 
 print(lf.explain(streaming=True))
 print(lf.collect())

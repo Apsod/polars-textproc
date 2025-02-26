@@ -4,6 +4,8 @@ Polars plugins to apply gopher repetetition penalties and fasttext classifiers t
 
 `polars_textproc.repetition_signals(expr)` applies the gopher repetetition signals to each text in the given `expr` (e.g. a dataframe column).
 Returns a struct containing `top_1_gram_char_ratio`, ... `top_4_gram_char_ratio`, `dup_5_gram_char_ratio` ... `dup_10_gram_char_ratio`.
+The underlying tokenization can be controlled using the `tokenizer_pattern` kwargs, a regexp which by default is `r"\w+"`.
+Note that the pattern is compiled by the rust regex crate, which doesn't match pythons `re` module.
 
 `polars_textproc.fasttext(expr, path, labels)` applies the fasttext model at path to each text in the given `expr` (e.g. a column). By default
 it returns a struct with the fields `top_label`, `top_score`, and `total_score`. 

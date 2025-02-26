@@ -124,9 +124,14 @@ fn ngrammer_output(input_fields: &[Field]) -> PolarsResult<Field> {
     }
 }
 
+#[derive(Deserialize)]
+struct RepetitionKwargs {
+    tokenizer_pattern: String,
+}
+
 #[polars_expr(output_type_func=ngrammer_output)]
-fn repetition_signals(inputs: &[Series]) -> PolarsResult<Series> {
-    let wordsplit: Regex = Regex::new(r"\s+")?;
+fn repetition_signals(inputs: &[Series], kwargs: RepetitionKwargs) -> PolarsResult<Series> {
+    let tokenizer: Regex = Regex::new(&kwargs.tokenizer_pattern)?;
     let ca: &StringChunked = inputs[0].str()?;
 
     let mut res : [Vec<f32>; N] = core::array::from_fn(|_| Vec::with_capacity(ca.len()));
@@ -134,7 +139,7 @@ fn repetition_signals(inputs: &[Series]) -> PolarsResult<Series> {
     validities.extend_constant(ca.len(), true);
     
     ca.iter().enumerate().for_each(|(row, v)| {
-        match v.map(|txt| dup_ngrams_str(wordsplit.split(txt))) {
+        match v.map(|txt| dup_ngrams_str(tokenizer.find_iter(txt).map(|x| x.as_str()))) {
             Some(signals) => {
                 res.iter_mut().zip(signals).for_each(|(r, s)| r.push(s));
             }

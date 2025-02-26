@@ -14,12 +14,13 @@ if TYPE_CHECKING:
 LIB = Path(__file__).parent
 
 
-def repetition_signals(expr: IntoExprColumn) -> pl.Expr:
+def repetition_signals(expr: IntoExprColumn, tokenizer_pattern: str = r'\w+') -> pl.Expr:
     return register_plugin_function(
         args=[expr],
         plugin_path=LIB,
         function_name="repetition_signals",
         is_elementwise=True,
+        kwargs={'tokenizer_pattern': tokenizer_pattern},
     )
 
 def fasttext(expr: IntoExprColumn, *, path: str, labels: List[str], output_aggregate: bool = True, output_scores: bool = False) -> pl.Expr:
