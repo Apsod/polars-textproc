@@ -1,6 +1,6 @@
 [package]
 name = "polars_textproc"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [lib]
@@ -16,3 +16,7 @@ polars-arrow = { version = "0.46.0" }
 regex = { version = "1.11.1" }
 fasttext = { version = "0.7.8" }
 cached = { version = "0.54.0" }
+xxhash-rust = "0.8.15"
+rand = "0.9.0"
+hex = "0.4.3"
+itertools = "0.14.0"

@@ -21,3 +21,8 @@ module-name = "polars_textproc._internal"
 [[tool.mypy.overrides]]
 module = "polars.utils.udfs"
 ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "maturin>=1.8.3",
+]

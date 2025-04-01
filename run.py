@@ -1,6 +1,6 @@
 import polars as pl
 import polars_textproc
-from polars_textproc import repetition_signals, fasttext
+from polars_textproc import repetition_signals, fasttext, minhash
 
 print(polars_textproc.__version__)
 
@@ -22,21 +22,37 @@ Stato
 
 Iste lingua non es parlate per le major numero del humanos in le mundo (vide lingua chinese mandarin), ma illo es inseniate in tote le mundo. Illo ha quasi devenite un lingua mundial, sovente usate como lingua franca. Il ha de 347.600.000 a 580.000.000 de parlantes in le mundo del quales circa 60.000.000 vive in Europa. Le anglese es un del linguas fontes primari de Interlingua e un del linguas official del Union Europee e del Nationes Unite. """
 
+interlingua2 = """\
+Le lingua anglese[1] es un lingua germanic con influentia del lingua latin, gratias al influentia del lingua francese diffundite durante le regno normanne del Anglaterra a partir de 1066.
+Stato
+
+Iste lingua non es parlate per le major numero del humanos in le mundo (vide lingua chinese mandarin), ma illo es inseniate in tote le mundo. Illo ha quasi devenite un lingua mundial, sovente usate como lingua franca. Il ha de 347.600.000 a 580.000.000 de parlantes in le mundo del quales circa 60.000.000 vive in Europa. Le anglese es un del linguas fontes primari de Interlingua e un del linguas official del Union Europee e del Nationes Unite. 
+And some extra stuff."""
 repetetive = """\
 This is a very repetetive text that is very repetetive and a text
 """ * 10
 
-
 df = pl.DataFrame({
-    "text": [english, swedish, interlingua, None, repetetive], 
-    "num" : [1, 2, 3, 4, 5],
+    "text": [english, swedish, interlingua, interlingua2, None, repetetive], 
+    "num" : [1, 2, 3, 4, 5, 6],
     })
 
-print(df)
+bsize_str = 2 * 128//8
 
+def minhash_buckets(col, buckets, bsize):
+    hashes = minhash(col, hashes=buckets*bsize)
+    return [hashes.str.slice(i*bsize_str, bsize_str).alias(f'bucket_{i}') for i in range(buckets)]
+
+normalized = pl.col('text').str.to_lowercase().str.replace_all(r'\W', ' ').str.replace_all(r'\s+', ' ')
+buckets = 14
+bsize = 8
+hashes = buckets * bsize
 lf = df.lazy()
 
-lf = lf.with_columns(repetition=repetition_signals("text", tokenizer_pattern=r'.'), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
-
-print(lf.explain(streaming=True))
-print(lf.collect())
+lf = lf.with_columns(norm = normalized, repetition=repetition_signals(normalized, tokenizer_pattern=r'.'), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), minhash=minhash(normalized, buckets=buckets, bsize=bsize))
+lf = lf.with_columns([pl.col('minhash').str.slice(i*bsize_str, bsize_str).alias(f'bucket_{i}') for i in range(buckets)])
+df = lf.collect()
+print(df)
+print(df[0, 'bucket_0'])
+print(df[0, 'bucket_13'])
+print(df[0, 'minhash'])

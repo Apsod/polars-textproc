@@ -2,93 +2,192 @@
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
 use polars_arrow::bitmap::{Bitmap, MutableBitmap};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, VecDeque};
 use regex::Regex;
 use fasttext::{FastText};
 use cached::proc_macro::cached;
 use serde::Deserialize;
 use std::sync::Arc;
+use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
+use rand::prelude::{StdRng, RngCore, SeedableRng};
+use itertools::izip;
 
+use std::hash::{BuildHasher, Hasher};
 use std::io::{Error, ErrorKind};
+
+// #######
+// Minhash
+// #######
+
+const MP_61: u64 = (1<<61) - 1;
+const MP_61_128: u128 = MP_61 as u128;
+
+struct MinHash {
+    a: Vec<u128>,
+    b: Vec<u128>,
+    buckets: usize,
+    bsize: usize,
+    window: usize,
+    hash_builder: Xxh3Builder,
+}
+
+macro_rules! into_bytes {
+    ($x:expr) => {
+        $x.into_iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<u8>>()
+    }
+}
+
+
+impl MinHash {
+    fn from_rng(rng: &mut StdRng, buckets: usize, bsize: usize, window: usize) -> Self {
+        let hashes = buckets*bsize;
+        let mut a = Vec::with_capacity(hashes);
+        let mut b = Vec::with_capacity(hashes);
+        for _ in 0..hashes {
+            a.push(1 + (rng.next_u64() % (MP_61-1)) as u128);
+            b.push((rng.next_u64() % MP_61) as u128);
+        }
+        MinHash {
+            a: a,
+            b: b,
+            buckets: buckets,
+            bsize: bsize,
+            window: window,
+            hash_builder: Xxh3Builder::new().with_seed(rng.next_u64()),
+        }
+    }
+
+    fn hashes(&self) -> usize {
+        self.buckets * self.bsize
+    }
+
+    fn from_seed(seed: [u8; 32], buckets: usize, bsize: usize, window: usize) -> Self{
+        Self::from_rng(&mut StdRng::from_seed(seed), buckets, bsize, window)
+    }
+
+    fn permute<'a>(&'a self, shingle: u64) -> impl 'a + Iterator<Item=u64> {
+        izip!(self.a.iter(), self.b.iter()).map(move |(ai, bi)| {
+            ((ai * (shingle as u128) + bi) % MP_61_128) as u64
+        })
+    }
+
+    fn mk_minhash<'a>(&self, vals: impl Iterator<Item=&'a str>) -> Vec<u64> {
+        let mut builder: VecDeque<&str> = VecDeque::with_capacity(self.window+1);
+        let mut minhash: Vec<u64> = vec![u64::MAX; self.hashes()];
+
+        for v in vals {
+            builder.push_front(v);
+            builder.truncate(self.window);
+            if builder.len() == self.window {
+                let mut hasher = self.hash_builder.build_hasher();
+                for v in &builder {
+                    hasher.update(v.as_bytes());
+                    hasher.write_u8(0xff);
+                }
+                let shingle_hash = hasher.digest() % MP_61;
+                izip!(&mut minhash, self.permute(shingle_hash)).for_each(|(mh, sh)| {
+                    *mh = std::cmp::min(*mh, sh)
+                });
+            }
+        }
+        minhash
+    }
+
+    fn mk_buckets<'a>(&self, vals: impl Iterator<Item=&'a str>) -> Vec<u128> {
+        // Take a `bucket * bsize` vector of minhashes, buckets them into
+        // `buckets` chunks of size `bsize`, and hash each bucket into a u128 hash.
+        // (Should be fine, unless we expect 2^64 different values, which we don't,
+        // and saves space for all scenarios where bsize > 1)
+        self.mk_minhash(vals).chunks(self.bsize).map(|bucket| xxh3_128(&into_bytes!(bucket))).collect()
+    }
+
+    fn apply_str<'a>(&self, vals: impl Iterator<Item=&'a str>) -> String {
+        // Construct a hex string representation of the bucket hashes.
+        if self.bsize > 1 {
+            hex::encode(into_bytes!(self.mk_buckets(vals)))
+        } else {
+            hex::encode(into_bytes!(self.mk_minhash(vals)))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct MinHashKwargs{
+    tokenizer_pattern: String,
+    seed: [u8; 32], 
+    buckets: usize,
+    bsize: usize,
+    window: usize,
+}
+
+#[polars_expr(output_type=String)]
+fn minhash(inputs: &[Series], kwargs: MinHashKwargs) -> PolarsResult<Series> {
+    let tokenizer: Regex = Regex::new(&kwargs.tokenizer_pattern)?;
+    let ca: &StringChunked = inputs[0].str()?;
+
+    let hasher = MinHash::from_seed(kwargs.seed, kwargs.buckets, kwargs.bsize, kwargs.window);
+    let out = ca.apply_into_string_amortized(|txt: &str, res: &mut String| {
+        res.push_str(&hasher.apply_str(tokenizer.find_iter(txt).map(|x| x.as_str())));
+    });
+
+    Ok(out.into_series())
+}
 
 // #########################
 // GOPHER repetition signals
 // #########################
 
-const L: usize = 4;
-const N: usize = 10;
-
 fn ratio(num: usize, den:usize) -> f32 {
     ((num as f64) / (den as f64)) as f32
 }
 
-fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N] 
+fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usize, vals: impl Iterator<Item = &'a str>) -> Vec<f32>
 {
     // Counts duplicate and top ngrams, avoiding overlap for duplicate ngrams. 
-    let mut seen : HashSet<String> = HashSet::new();
-    let mut counts : HashMap<String, usize> = HashMap::new();
-    //sbuf and lbuf are circular buffers
+    let mut seen : HashSet<u128> = HashSet::new();
+    let mut counts : HashMap<u128, usize> = HashMap::new();
     //sbuf tracks the last N seen tokens
     //lbuf tracks the cumulative length of the last N seen tokens.
-    let mut sbuf : [&str; N] = [""; N];
-    let mut lbuf : [usize; N] = [0; N];
+    let mut sbuf: VecDeque<&str> = VecDeque::with_capacity(num_dup+1);
+    let mut lbuf: VecDeque<usize> = VecDeque::with_capacity(num_dup+1);
     // last[n] is the leftmost position of the last duplicate "n"-gram.
     // It is used to avoid double counting overlapping duplicates.
     // dups[n] counts the number of characters covered by duplicate "n"-grams.
     // tot is the total number of characters seen.
-    let mut last : [usize; N] = [0; N];
-    let mut dups : [usize; N] = [0; N];
+    let mut last : Vec<usize> = vec![0; num_dup];
+    let mut dups : Vec<usize> = vec![0; num_dup];
     let mut tot: usize = 0;
+
 
     for (pos, v) in vals.enumerate() {
         let vlen = v.chars().count();
-        let filled = std::cmp::min(N, pos+1);
-        let i = pos % N;
-
+        lbuf.push_front(0);
+        sbuf.push_front(v);
+        lbuf.truncate(num_dup);
+        sbuf.truncate(num_dup);
         tot += vlen;
-        lbuf[i] = 0;
-        sbuf[i] = v;
-        
-        let mut s = String::with_capacity(vlen + filled + lbuf[(i + filled - 1) % N]);
+        let mut hasher = hash_builder.build_hasher();
         // s : string buffer where we put the n-gram parts.
-        // n : zero-indexed n-gram "n", so n=0 ~ unigram, n=1 ~ bigrams, et.c.
-        // j : index corresponding to the current n-gram in the circular buffers lbuf, sbuf.
-        // The ngram is built up in reverse, iterating over the circular buffer:
+        // The ngram is built up in reverse, iterating over the deques:
         // Say we've seen [the, cat, sat, on, the], and the current word is "mat", for N=4, L=2.
         // pos = 5
         // i = 1
-        // sbuf = [the, mat, sat, on]
-        // n = 0: j = 1, lbuf[1] =  3, ngram = "mat"
-        // n = 1: j = 0, lbuf[0] =  6, ngram = "mat the"
-        // n = 2: j = 3, lbuf[3] =  8, ngram = "mat the on"
-        // n = 3: j = 2, lbuf[2] = 11, ngram = "mat the on sat"
-        for n in 0..filled {
-            // this corresponds to j = (i - n) % N.
-            // the formulation below is to avoid underflow.
-            let j = (i + n*(N-1)) % N;
-
-            lbuf[j] += vlen;
-            s.push_str(sbuf[j]);
-            let ngram = s.clone();
-            s.push(' ');
-
-            if n < L {
-                // top-ngram
-                // Increment counts[ngram] by the ngram length, 
-                // And set dups[n] to counts[ngram] if it's larger
-                // than the current dups[n].
+        // sbuf = [mat, the, on, sat]
+        
+        for (n, (gram, dup)) in izip!(&sbuf, &mut dups).enumerate() {
+            lbuf[n] += vlen;
+            hasher.update(gram.as_bytes());
+            hasher.write_u8(0xff);
+            let ngram = hasher.digest128();
+            if n < num_top {
                 let v = counts.entry(ngram).or_insert(0);
-                *v += lbuf[j];
-                dups[n] = std::cmp::max(dups[n], *v);
+                *v += lbuf[n];
+                *dup = std::cmp::max(*dup, *v);
             } else if ! seen.insert(ngram) {
-                // dup-ngram
-                // last[n] is the position where a duplicate "n"-gram was last observed.
                 // unaccounted is the number of n-gram parts (-1) that should be accounted for
                 // when updating the number of characters covered by duplicate "n"-grams.
-                // lbuf[(i - unaccounted) % N] corresponds the the cumulative length of
-                // the (unaccounted + 1) most recent tokens.
-                let unaccounted : usize = std::cmp::min(n, pos - last[n] - 1);
-                dups[n] += lbuf[(i + unaccounted*(N-1)) % N];
+                let unaccounted: usize = std::cmp::min(n, pos - last[n] - 1);
+                *dup += lbuf[unaccounted];
                 last[n] = pos;
             }
         }
@@ -97,28 +196,42 @@ fn dup_ngrams_str<'a>(vals: impl Iterator<Item = &'a str>) -> [f32; N]
     // Hack to deal with division by zero.
     // tot = 0 => all dups = 0.
     let tot = std::cmp::max(1, tot); 
-    dups.map(|dup| ratio(dup, tot))
+    dups.into_iter().map(|dup| ratio(dup, tot)).collect()
 }
 
-fn fieldname(i: usize) -> String {
-    format!("{}_{}_gram_char_ratio", if i < L {"top"} else {"dup"}, i+1)
+fn fieldname(num_top: usize, num_dup: usize, i: usize) -> String {
+    if i < num_top {
+        format!("top_{}_gram_char_ratio", i+1)
+    } else if i < num_dup {
+        format!("dup_{}_gram_char_ratio", i+1)
+    } else {
+        panic!("field {} larger than {}", i, num_dup)
+    }
 }
 
-fn ngrammer_output(input_fields: &[Field]) -> PolarsResult<Field> {
+fn repetition_output(input_fields: &[Field], kwargs: RepetitionKwargs) -> PolarsResult<Field> {
     let field = &input_fields[0];
+
+    if kwargs.num_top > kwargs.num_dup {
+        polars_bail!(InvalidOperation: "num top must be not be greater than num dup, got {} > {}", kwargs.num_top, kwargs.num_dup)
+    }
 
     match field.dtype() {
         DataType::String => {
-            let fields : [Field; N] = core::array::from_fn(|i| {
-                Field::new(
-                    fieldname(i).into(),
-                    DataType::Float32,
-                    ) 
-            });
+            let mut fields : Vec<Field> = Vec::with_capacity(kwargs.num_dup);
+            for i in 0..kwargs.num_dup {
+                fields.push(
+                    Field::new(
+                        fieldname(kwargs.num_top, kwargs.num_dup, i).into(),
+                        DataType::Float32,
+                    )
+                );
+            }
             Ok(Field::new(
-                    "repetition".into(), 
+                    "repetition".into(),
                     DataType::Struct(fields.into())
-                    ))
+                    )
+                )
         }
         dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype)
     }
@@ -127,19 +240,22 @@ fn ngrammer_output(input_fields: &[Field]) -> PolarsResult<Field> {
 #[derive(Deserialize)]
 struct RepetitionKwargs {
     tokenizer_pattern: String,
+    num_top: usize,
+    num_dup: usize,
 }
 
-#[polars_expr(output_type_func=ngrammer_output)]
+#[polars_expr(output_type_func_with_kwargs=repetition_output)]
 fn repetition_signals(inputs: &[Series], kwargs: RepetitionKwargs) -> PolarsResult<Series> {
     let tokenizer: Regex = Regex::new(&kwargs.tokenizer_pattern)?;
+    let hash_builder = Xxh3Builder::new().with_seed(0x5eed);
     let ca: &StringChunked = inputs[0].str()?;
-
-    let mut res : [Vec<f32>; N] = core::array::from_fn(|_| Vec::with_capacity(ca.len()));
+    
+    let mut res: Vec<Vec<f32>> = vec![Vec::with_capacity(ca.len()); kwargs.num_dup];
     let mut validities = MutableBitmap::with_capacity(ca.len());
     validities.extend_constant(ca.len(), true);
     
     ca.iter().enumerate().for_each(|(row, v)| {
-        match v.map(|txt| dup_ngrams_str(tokenizer.find_iter(txt).map(|x| x.as_str()))) {
+        match v.map(|txt| dup_ngrams_hash(&hash_builder, kwargs.num_top, kwargs.num_dup, tokenizer.find_iter(txt).map(|x| x.as_str()))) {
             Some(signals) => {
                 res.iter_mut().zip(signals).for_each(|(r, s)| r.push(s));
             }
@@ -152,7 +268,7 @@ fn repetition_signals(inputs: &[Series], kwargs: RepetitionKwargs) -> PolarsResu
 
     let validities : Bitmap = validities.into();
     let res : Vec<Series> = res.into_iter().enumerate().map(|(i, v)| {
-        ChunkedArray::<Float32Type>::from_vec_validity(fieldname(i).into(), v, Some(validities.clone())).into_series()
+        ChunkedArray::<Float32Type>::from_vec_validity(fieldname(kwargs.num_top, kwargs.num_dup, i).into(), v, Some(validities.clone())).into_series()
     }).collect();
 
     StructChunked::from_series(
