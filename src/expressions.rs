@@ -13,7 +13,7 @@ use rand::prelude::{StdRng, RngCore, SeedableRng};
 use itertools::izip;
 
 use std::hash::{BuildHasher, Hasher};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 // #######
 // Minhash
@@ -47,13 +47,14 @@ impl MinHash {
             a.push(1 + (rng.next_u64() % (MP_61-1)) as u128);
             b.push((rng.next_u64() % MP_61) as u128);
         }
+        let hash_builder = Xxh3Builder::new().with_seed(rng.next_u64());
         MinHash {
-            a: a,
-            b: b,
-            buckets: buckets,
-            bsize: bsize,
-            window: window,
-            hash_builder: Xxh3Builder::new().with_seed(rng.next_u64()),
+            a,
+            b,
+            buckets,
+            bsize,
+            window,
+            hash_builder,
         }
     }
 
@@ -65,7 +66,7 @@ impl MinHash {
         Self::from_rng(&mut StdRng::from_seed(seed), buckets, bsize, window)
     }
 
-    fn permute<'a>(&'a self, shingle: u64) -> impl 'a + Iterator<Item=u64> {
+    fn permute(&self, shingle: u64) -> impl '_ + Iterator<Item=u64> {
         izip!(self.a.iter(), self.b.iter()).map(move |(ai, bi)| {
             ((ai * (shingle as u128) + bi) % MP_61_128) as u64
         })
@@ -229,7 +230,7 @@ fn repetition_output(input_fields: &[Field], kwargs: RepetitionKwargs) -> Polars
             }
             Ok(Field::new(
                     "repetition".into(),
-                    DataType::Struct(fields.into())
+                    DataType::Struct(fields)
                     )
                 )
         }
@@ -380,7 +381,7 @@ struct FasttextKwargs{
 
 impl FasttextKwargs {
     fn load(&self) -> Result<FasttextModel, Error> {
-        FasttextModel::new(&self.path, &self.labels).map_err(|e| std::io::Error::new(ErrorKind::Other, e))
+        FasttextModel::new(&self.path, &self.labels).map_err(std::io::Error::other)
     }
 }
 
