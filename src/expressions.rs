@@ -1,23 +1,22 @@
 #![allow(clippy::unused_unit)]
-use polars::prelude::*;
-use pyo3_polars::derive::polars_expr;
-use polars_arrow::bitmap::{Bitmap, MutableBitmap};
-use std::collections::{HashSet, HashMap, VecDeque};
-use regex::{Regex, RegexSet};
-use fasttext::{FastText};
-use cached::proc_macro::cached;
-use serde::Deserialize;
-use std::sync::Arc;
-use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
-use itertools::izip;
-use uuid::Uuid;
-
-use rand::Rng;
-use rand::prelude::{StdRng, RngCore, SeedableRng};
-use rand::distr::uniform::{Uniform};
-
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hasher};
 use std::io::Error;
+use std::sync::Arc;
+
+use cached::proc_macro::cached;
+use fasttext::FastText;
+use itertools::izip;
+use polars::prelude::*;
+use polars_arrow::bitmap::{Bitmap, MutableBitmap};
+use pyo3_polars::derive::polars_expr;
+use rand::distr::uniform::Uniform;
+use rand::prelude::{RngCore, SeedableRng, StdRng};
+use rand::Rng;
+use regex::{Regex, RegexSet};
+use serde::Deserialize;
+use uuid::Uuid;
+use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
 
 // ####
 // UUID
@@ -38,21 +37,29 @@ fn uuid4(inputs: &[Series]) -> PolarsResult<Series> {
 // Minhash
 // #######
 
-const HM: u64 = (1<<32) - 1;
+//const HM: u64 = (1 << 32) - 1;
 const MP: u64 = (1 << 61) - 1;
 const MP_128: u128 = MP as u128;
 
 fn mod61(x: u64) -> u64 {
     let y = (x & MP) + (x >> 61);
-    if y < MP {y} else {y - MP}
+    if y < MP {
+        y
+    } else {
+        y - MP
+    }
 }
 
 fn mod61_128(x: u128) -> u64 {
     let y = ((x & MP_128) + (x >> 61)) as u64;
-    if y < MP {y} else {y - MP}
+    if y < MP {
+        y
+    } else {
+        y - MP
+    }
 }
 
-fn affine61(a: u64, b: u64, x: u64) -> u64{
+fn affine61(a: u64, b: u64, x: u64) -> u64 {
     let y = (a as u128) * (x as u128) + (b as u128);
     mod61_128(y)
 }
@@ -68,13 +75,15 @@ struct MinHash {
 
 macro_rules! into_bytes {
     ($x:expr) => {
-        $x.into_iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<u8>>()
-    }
+        $x.into_iter()
+            .flat_map(|v| v.to_be_bytes())
+            .collect::<Vec<u8>>()
+    };
 }
 
 impl MinHash {
     fn from_rng(rng: &mut StdRng, buckets: usize, bsize: usize, window: usize) -> Self {
-        let hashes = buckets*bsize;
+        let hashes = buckets * bsize;
         let mut a = Vec::with_capacity(hashes);
         let mut b = Vec::with_capacity(hashes);
         let a_dist: Uniform<u64> = Uniform::new(1, MP).unwrap();
@@ -98,12 +107,12 @@ impl MinHash {
         self.buckets * self.bsize
     }
 
-    fn from_seed(seed: [u8; 32], buckets: usize, bsize: usize, window: usize) -> Self{
+    fn from_seed(seed: [u8; 32], buckets: usize, bsize: usize, window: usize) -> Self {
         Self::from_rng(&mut StdRng::from_seed(seed), buckets, bsize, window)
     }
 
-    fn mk_minhash<'a>(&self, vals: impl Iterator<Item=&'a str>) -> Vec<u64> {
-        let mut builder: VecDeque<&str> = VecDeque::with_capacity(self.window+1);
+    fn mk_minhash<'a>(&self, vals: impl Iterator<Item = &'a str>) -> Vec<u64> {
+        let mut builder: VecDeque<&str> = VecDeque::with_capacity(self.window + 1);
         let minhash: &mut [u64] = &mut vec![u64::MAX; self.hashes()][..];
         //let mut minhash: Vec<u64> = vec![u64::MAX; self.hashes()];
         vals.filter_map(|w| {
@@ -119,23 +128,26 @@ impl MinHash {
             } else {
                 None
             }
-        }).for_each(|shingle| {
-            izip!(minhash.iter_mut(), &self.a, &self.b).for_each(|(mh, a, b)| {
-                *mh = std::cmp::min(*mh, affine61(*a, *b, shingle))
-            });
+        })
+        .for_each(|shingle| {
+            izip!(minhash.iter_mut(), &self.a, &self.b)
+                .for_each(|(mh, a, b)| *mh = std::cmp::min(*mh, affine61(*a, *b, shingle)));
         });
         minhash.to_vec()
     }
 
-    fn mk_buckets<'a>(&self, vals: impl Iterator<Item=&'a str>) -> Vec<u128> {
+    fn mk_buckets<'a>(&self, vals: impl Iterator<Item = &'a str>) -> Vec<u128> {
         // Take a `bucket * bsize` vector of minhashes, buckets them into
         // `buckets` chunks of size `bsize`, and hash each bucket into a u128 hash.
         // (Should be fine, unless we expect 2^64 different values, which we don't,
         // and saves space for all scenarios where bsize > 1)
-        self.mk_minhash(vals).chunks(self.bsize).map(|bucket| xxh3_128(&into_bytes!(bucket))).collect()
+        self.mk_minhash(vals)
+            .chunks(self.bsize)
+            .map(|bucket| xxh3_128(&into_bytes!(bucket)))
+            .collect()
     }
 
-    fn apply_str<'a>(&self, vals: impl Iterator<Item=&'a str>) -> String {
+    fn apply_str<'a>(&self, vals: impl Iterator<Item = &'a str>) -> String {
         // Construct a hex string representation of the bucket hashes.
         if self.bsize > 1 {
             hex::encode(into_bytes!(self.mk_buckets(vals)))
@@ -146,9 +158,9 @@ impl MinHash {
 }
 
 #[derive(Deserialize)]
-struct MinHashKwargs{
+struct MinHashKwargs {
     tokenizer_pattern: String,
-    seed: [u8; 32], 
+    seed: [u8; 32],
     buckets: usize,
     bsize: usize,
     window: usize,
@@ -171,25 +183,29 @@ fn minhash(inputs: &[Series], kwargs: MinHashKwargs) -> PolarsResult<Series> {
 // GOPHER repetition signals
 // #########################
 
-fn ratio(num: usize, den:usize) -> f32 {
+fn ratio(num: usize, den: usize) -> f32 {
     ((num as f64) / (den as f64)) as f32
 }
 
-fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usize, vals: impl Iterator<Item = &'a str>) -> Vec<f32>
-{
-    // Counts duplicate and top ngrams, avoiding overlap for duplicate ngrams. 
-    let mut seen : HashSet<u128> = HashSet::new();
-    let mut counts : HashMap<u128, usize> = HashMap::new();
+fn dup_ngrams_hash<'a>(
+    hash_builder: &Xxh3Builder,
+    num_top: usize,
+    num_dup: usize,
+    vals: impl Iterator<Item = &'a str>,
+) -> Vec<f32> {
+    // Counts duplicate and top ngrams, avoiding overlap for duplicate ngrams.
+    let mut seen: HashSet<u128> = HashSet::new();
+    let mut counts: HashMap<u128, usize> = HashMap::new();
     //sbuf tracks the last N seen tokens
     //lbuf tracks the cumulative length of the last N seen tokens.
-    let mut sbuf: VecDeque<&str> = VecDeque::with_capacity(num_dup+1);
-    let mut lbuf: VecDeque<usize> = VecDeque::with_capacity(num_dup+1);
+    let mut sbuf: VecDeque<&str> = VecDeque::with_capacity(num_dup + 1);
+    let mut lbuf: VecDeque<usize> = VecDeque::with_capacity(num_dup + 1);
     // last[n] is the leftmost position of the last duplicate "n"-gram.
     // It is used to avoid double counting overlapping duplicates.
     // dups[n] counts the number of characters covered by duplicate "n"-grams.
     // tot is the total number of characters seen.
-    let last : &mut [usize] = &mut vec![0; num_dup];
-    let dups : &mut [usize] = &mut vec![0; num_dup];
+    let last: &mut [usize] = &mut vec![0; num_dup];
+    let dups: &mut [usize] = &mut vec![0; num_dup];
     let mut tot: usize = 0;
 
     for (pos, v) in vals.enumerate() {
@@ -215,7 +231,7 @@ fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usiz
                 let v = counts.entry(ngram).or_insert(0);
                 *v += lbuf[n];
                 *dup = std::cmp::max(*dup, *v);
-            } else if ! seen.insert(ngram) {
+            } else if !seen.insert(ngram) {
                 // unaccounted is the number of n-gram parts (-1) that should be accounted for
                 // when updating the number of characters covered by duplicate "n"-grams.
                 // For example:
@@ -231,18 +247,18 @@ fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usiz
             }
         }
     }
-    
+
     // Hack to deal with division by zero.
     // tot = 0 => all dups = 0.
-    let tot = std::cmp::max(1, tot); 
-    dups.into_iter().map(|dup| ratio(*dup, tot)).collect()
+    let tot = std::cmp::max(1, tot);
+    dups.iter().map(|dup| ratio(*dup, tot)).collect()
 }
 
 fn fieldname(num_top: usize, num_dup: usize, i: usize) -> String {
     if i < num_top {
-        format!("top_{}_gram_char_ratio", i+1)
+        format!("top_{}_gram_char_ratio", i + 1)
     } else if i < num_dup {
-        format!("dup_{}_gram_char_ratio", i+1)
+        format!("dup_{}_gram_char_ratio", i + 1)
     } else {
         panic!("field {} larger than {}", i, num_dup)
     }
@@ -257,22 +273,16 @@ fn repetition_output(input_fields: &[Field], kwargs: RepetitionKwargs) -> Polars
 
     match field.dtype() {
         DataType::String => {
-            let mut fields : Vec<Field> = Vec::with_capacity(kwargs.num_dup);
+            let mut fields: Vec<Field> = Vec::with_capacity(kwargs.num_dup);
             for i in 0..kwargs.num_dup {
-                fields.push(
-                    Field::new(
-                        fieldname(kwargs.num_top, kwargs.num_dup, i).into(),
-                        DataType::Float32,
-                    )
-                );
+                fields.push(Field::new(
+                    fieldname(kwargs.num_top, kwargs.num_dup, i).into(),
+                    DataType::Float32,
+                ));
             }
-            Ok(Field::new(
-                    "repetition".into(),
-                    DataType::Struct(fields)
-                    )
-                )
-        }
-        dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype)
+            Ok(Field::new("repetition".into(), DataType::Struct(fields)))
+        },
+        dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype),
     }
 }
 
@@ -288,39 +298,51 @@ fn repetition_signals(inputs: &[Series], kwargs: RepetitionKwargs) -> PolarsResu
     let tokenizer: Regex = Regex::new(&kwargs.tokenizer_pattern)?;
     let hash_builder = Xxh3Builder::new().with_seed(0x5eed);
     let ca: &StringChunked = inputs[0].str()?;
-    
+
     let mut res: Vec<Vec<f32>> = vec![Vec::with_capacity(ca.len()); kwargs.num_dup];
     let mut validities = MutableBitmap::with_capacity(ca.len());
     validities.extend_constant(ca.len(), true);
-    
+
     ca.iter().enumerate().for_each(|(row, v)| {
-        match v.map(|txt| dup_ngrams_hash(&hash_builder, kwargs.num_top, kwargs.num_dup, tokenizer.find_iter(txt).map(|x| x.as_str()))) {
+        match v.map(|txt| {
+            dup_ngrams_hash(
+                &hash_builder,
+                kwargs.num_top,
+                kwargs.num_dup,
+                tokenizer.find_iter(txt).map(|x| x.as_str()),
+            )
+        }) {
             Some(signals) => {
                 res.iter_mut().zip(signals).for_each(|(r, s)| r.push(s));
-            }
+            },
             None => {
-                validities.set(row, false); 
+                validities.set(row, false);
                 res.iter_mut().for_each(|r| r.push(0.0));
-            }
+            },
         }
     });
 
-    let validities : Bitmap = validities.into();
-    let res : Vec<Series> = res.into_iter().enumerate().map(|(i, v)| {
-        ChunkedArray::<Float32Type>::from_vec_validity(fieldname(kwargs.num_top, kwargs.num_dup, i).into(), v, Some(validities.clone())).into_series()
-    }).collect();
+    let validities: Bitmap = validities.into();
+    let res: Vec<Series> = res
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
+            ChunkedArray::<Float32Type>::from_vec_validity(
+                fieldname(kwargs.num_top, kwargs.num_dup, i).into(),
+                v,
+                Some(validities.clone()),
+            )
+            .into_series()
+        })
+        .collect();
 
-    StructChunked::from_series(
-        inputs[0].name().clone(),
-        ca.len(),
-        res.iter(),
-        ).map(|x| x.into_series())
+    StructChunked::from_series(inputs[0].name().clone(), ca.len(), res.iter())
+        .map(|x| x.into_series())
 }
 
 // ###############
 // Regexp scrubber
 // ###############
-
 
 //fn fuse_bounds(bounds: impl Iterator<Item=(usize, usize)>) -> impl Iterator<Item=(usize, usize)> {
 //    bounds.fold(BTreeMap::new(), |mut acc, (start, stop)| {
@@ -345,14 +367,16 @@ fn repetition_signals(inputs: &[Series], kwargs: RepetitionKwargs) -> PolarsResu
 //        if let Some(entry) = middle.last_entry() {
 //            stop = stop.max(*entry.get());
 //        }
-//        
+//
 //        acc.insert(start, stop);
 //        acc.append(&mut tail);
 //        acc
 //    }).into_iter()
 //}
 
-fn fuse_bounds(bounds: impl Iterator<Item=(usize, usize)>) -> impl Iterator<Item=(usize, usize)> {
+fn fuse_bounds(
+    bounds: impl Iterator<Item = (usize, usize)>,
+) -> impl Iterator<Item = (usize, usize)> {
     let mut bounds: Vec<(usize, usize)> = bounds.collect();
     if bounds.is_empty() {
         Vec::new().into_iter()
@@ -362,7 +386,7 @@ fn fuse_bounds(bounds: impl Iterator<Item=(usize, usize)>) -> impl Iterator<Item
         let mut merged = Vec::with_capacity(bounds.len());
         let mut current_merge = bounds[0];
 
-        for &(next_start, next_stop) in &bounds[1..]{
+        for &(next_start, next_stop) in &bounds[1..] {
             if next_start <= current_merge.1 {
                 current_merge.1 = current_merge.1.max(next_stop);
             } else {
@@ -376,7 +400,7 @@ fn fuse_bounds(bounds: impl Iterator<Item=(usize, usize)>) -> impl Iterator<Item
 }
 
 #[derive(Deserialize)]
-struct ScrubKwargs{
+struct ScrubKwargs {
     patterns: Vec<String>,
     replacement: String,
 }
@@ -394,12 +418,10 @@ fn scrub(inputs: &[Series], kwargs: ScrubKwargs) -> PolarsResult<Series> {
 
     let out = ca.apply_into_string_amortized(|txt: &str, res: &mut String| {
         let bounds = pattern_set
-            .matches(&txt)
+            .matches(txt)
             .into_iter()
             .map(|index| &patterns[index])
-            .flat_map(|pattern| {
-                pattern.find_iter(&txt).map(move |m| (m.start(), m.end()))
-            });
+            .flat_map(|pattern| pattern.find_iter(txt).map(move |m| (m.start(), m.end())));
 
         let mut last_stop = 0;
         for (start, stop) in fuse_bounds(bounds) {
@@ -408,7 +430,6 @@ fn scrub(inputs: &[Series], kwargs: ScrubKwargs) -> PolarsResult<Series> {
             last_stop = stop;
         }
         res.push_str(&txt[last_stop..]);
-
     });
 
     Ok(out.into_series())
@@ -418,7 +439,7 @@ fn scrub(inputs: &[Series], kwargs: ScrubKwargs) -> PolarsResult<Series> {
 // Fasttext labeling
 // #################
 
-#[cached(time=60, time_refresh=true, sync_writes = true)]
+#[cached(time = 60, time_refresh = true, sync_writes = true)]
 fn load_model(path: String) -> Result<Arc<FastText>, String> {
     let mut model = FastText::new();
     model.load_model(&path)?;
@@ -426,26 +447,24 @@ fn load_model(path: String) -> Result<Arc<FastText>, String> {
 }
 
 struct FasttextModel {
-    model : Arc<FastText>,
-    labelmap : HashMap<String, usize>, 
+    model: Arc<FastText>,
+    labelmap: HashMap<String, usize>,
 }
 
 struct FasttextOutput {
     top_label: u32,
     top_score: f32,
     total_score: f32,
-    scores: Vec<f32>
+    scores: Vec<f32>,
 }
 
 impl FasttextModel {
     fn new(path: &str, labels: &[String]) -> Result<Self, String> {
         let m = load_model(path.into())?;
-        Ok(
-            Self {
-                model: m,
-                labelmap: HashMap::from_iter(labels.iter().enumerate().map(|(i,s)| (s.clone(), i))),
-            }
-        )
+        Ok(Self {
+            model: m,
+            labelmap: HashMap::from_iter(labels.iter().enumerate().map(|(i, s)| (s.clone(), i))),
+        })
     }
 
     fn len(&self) -> usize {
@@ -454,11 +473,11 @@ impl FasttextModel {
 
     fn predict(&self, txt: &str) -> Result<FasttextOutput, String> {
         let preds = self.model.predict(txt, -1, 0.0)?;
-        let mut scores : Vec<f32> = vec![0.0; self.len()];
+        let mut scores: Vec<f32> = vec![0.0; self.len()];
         let mut top_label = 0;
         let mut top_score = 0.0;
         let mut total_score = 0.0;
-        
+
         preds.into_iter().for_each(|p| {
             if let Some(i) = self.labelmap.get(&p.label) {
                 let i = *i;
@@ -470,7 +489,12 @@ impl FasttextModel {
                 }
             }
         });
-        Ok(FasttextOutput { top_label, top_score, total_score, scores })
+        Ok(FasttextOutput {
+            top_label,
+            top_score,
+            total_score,
+            scores,
+        })
     }
 }
 
@@ -489,25 +513,15 @@ fn fasttext_output(input_fields: &[Field], kwargs: FasttextKwargs) -> PolarsResu
             fields.push(Field::new(label.into(), DataType::Float32));
         }
     }
-    
 
     match field.dtype() {
-        DataType::String => {
-            Ok(
-                Field::new(
-                    "langid".into(),
-                    DataType::Struct(
-                        fields
-                    )
-                )
-            )
-        }
-        dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype)
+        DataType::String => Ok(Field::new("langid".into(), DataType::Struct(fields))),
+        dtype => polars_bail!(InvalidOperation: "expected string dtype, got {}", dtype),
     }
 }
 
 #[derive(Deserialize)]
-struct FasttextKwargs{
+struct FasttextKwargs {
     path: String,
     labels: Vec<String>,
     output_aggregate: bool,
@@ -526,15 +540,15 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
     let model = kwargs.load()?;
     let l = ca.len();
     let n = model.len();
-    
+
     let mut validities = MutableBitmap::with_capacity(l);
     validities.extend_constant(ca.len(), true);
 
-    let mut top_label : Vec<u32> = Vec::new(); 
-    let mut top_score : Vec<f32> = Vec::new();
-    let mut total_score : Vec<f32> = Vec::new();
-    let mut label_scores : Vec<Vec<f32>> = Vec::new();
-    
+    let mut top_label: Vec<u32> = Vec::new();
+    let mut top_score: Vec<f32> = Vec::new();
+    let mut total_score: Vec<f32> = Vec::new();
+    let mut label_scores: Vec<Vec<f32>> = Vec::new();
+
     if kwargs.output_aggregate {
         top_label.reserve_exact(l);
         top_score.reserve_exact(l);
@@ -558,9 +572,12 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
                     total_score.push(output.total_score);
                 }
                 if kwargs.output_scores {
-                    label_scores.iter_mut().zip(output.scores).for_each(|(r, s)| {
-                        r.push(s); 
-                    });
+                    label_scores
+                        .iter_mut()
+                        .zip(output.scores)
+                        .for_each(|(r, s)| {
+                            r.push(s);
+                        });
                 }
             },
             None => {
@@ -575,39 +592,55 @@ fn fasttext(inputs: &[Series], kwargs: FasttextKwargs) -> PolarsResult<Series> {
                         r.push(0.0);
                     });
                 }
-            }
+            },
         }
     });
 
-    let validities : Bitmap = validities.into();
-    let mut res : Vec<Series> = Vec::new();
+    let validities: Bitmap = validities.into();
+    let mut res: Vec<Series> = Vec::new();
 
     if kwargs.output_aggregate {
         res.push(
-            ChunkedArray::<UInt32Type>::from_vec_validity("top_label".into(), top_label, Some(validities.clone())).apply_into_string_amortized(
-                | index: u32, output: &mut String | {
-                    output.push_str(&kwargs.labels[index as usize]);
-                }
-            ).into_series()
+            ChunkedArray::<UInt32Type>::from_vec_validity(
+                "top_label".into(),
+                top_label,
+                Some(validities.clone()),
+            )
+            .apply_into_string_amortized(|index: u32, output: &mut String| {
+                output.push_str(&kwargs.labels[index as usize]);
+            })
+            .into_series(),
         );
         res.push(
-            ChunkedArray::<Float32Type>::from_vec_validity("top_score".into(), top_score, Some(validities.clone())).into_series()
+            ChunkedArray::<Float32Type>::from_vec_validity(
+                "top_score".into(),
+                top_score,
+                Some(validities.clone()),
+            )
+            .into_series(),
         );
         res.push(
-            ChunkedArray::<Float32Type>::from_vec_validity("total_score".into(), total_score, Some(validities.clone())).into_series()
+            ChunkedArray::<Float32Type>::from_vec_validity(
+                "total_score".into(),
+                total_score,
+                Some(validities.clone()),
+            )
+            .into_series(),
         );
     }
     if kwargs.output_scores {
         for (i, label_score) in label_scores.into_iter().enumerate() {
             res.push(
-                ChunkedArray::<Float32Type>::from_vec_validity(kwargs.labels[i].clone().into(), label_score, Some(validities.clone())).into_series()
+                ChunkedArray::<Float32Type>::from_vec_validity(
+                    kwargs.labels[i].clone().into(),
+                    label_score,
+                    Some(validities.clone()),
+                )
+                .into_series(),
             )
         }
     }
 
-    StructChunked::from_series(
-        inputs[0].name().clone(),
-        ca.len(),
-        res.iter(),
-    ).map(|x| x.into_series())
+    StructChunked::from_series(inputs[0].name().clone(), ca.len(), res.iter())
+        .map(|x| x.into_series())
 }

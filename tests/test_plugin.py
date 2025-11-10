@@ -1,4 +1,3 @@
-
 def test_plugin():
     import polars as pl
     import polars.selectors as cs
@@ -21,22 +20,28 @@ def test_plugin():
 
     Iste lingua non es parlate per le major numero del humanos in le mundo (vide lingua chinese mandarin), ma illo es inseniate in tote le mundo. Illo ha quasi devenite un lingua mundial, sovente usate como lingua franca. Il ha de 347.600.000 a 580.000.000 de parlantes in le mundo del quales circa 60.000.000 vive in Europa. Le anglese es un del linguas fontes primari de Interlingua e un del linguas official del Union Europee e del Nationes Unite. """
 
-    repetetive = """
+    repetetive = (
+        """
     This is a very repetetive text that is very repetetive and a text
-    """ * 10
+    """
+        * 10
+    )
 
-
-    df = pl.DataFrame({
-        "text": [english, swedish, interlingua, None, repetetive], 
-        "num" : [1, 2, 3, 4, 5],
-        })
+    df = pl.DataFrame(
+        {
+            "text": [english, swedish, interlingua, None, repetetive],
+            "num": [1, 2, 3, 4, 5],
+        }
+    )
 
     lf = df.lazy()
 
-    lf = lf.with_columns(repetition=repetition_signals("text"))#, langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
-    lf = lf.unnest('repetition')#.unnest('langid')
+    lf = lf.with_columns(
+        repetition=repetition_signals("text")
+    )  # , langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]))
+    lf = lf.unnest("repetition")  # .unnest('langid')
 
     df = lf.collect()
-    
-    signals = df.select(cs.ends_with('gram_char_ratio'))
-    assert (signals.max() == signals[4]).select(all=pl.all_horizontal('*')).item()
+
+    signals = df.select(cs.ends_with("gram_char_ratio"))
+    assert (signals.max() == signals[4]).select(all=pl.all_horizontal("*")).item()

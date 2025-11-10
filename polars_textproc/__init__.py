@@ -13,17 +13,60 @@ if TYPE_CHECKING:
 
 LIB = Path(__file__).parent
 
-SEED = [179, 28, 18, 84, 75, 144, 79, 252, 138, 70, 118, 68, 23, 234, 55, 243, 220, 195, 42, 178, 73, 192, 91, 161, 228, 176, 67, 210, 33, 75, 126, 56]
+SEED = [
+    179,
+    28,
+    18,
+    84,
+    75,
+    144,
+    79,
+    252,
+    138,
+    70,
+    118,
+    68,
+    23,
+    234,
+    55,
+    243,
+    220,
+    195,
+    42,
+    178,
+    73,
+    192,
+    91,
+    161,
+    228,
+    176,
+    67,
+    210,
+    33,
+    75,
+    126,
+    56,
+]
+
 
 def uuid4(expr: IntoExprColumn) -> pl.Expr:
     return register_plugin_function(
-            args=[expr],
-            plugin_path=LIB,
-            function_name='uuid4',
-            is_elementwise=True,
+        args=[expr],
+        plugin_path=LIB,
+        function_name="uuid4",
+        is_elementwise=True,
     )
 
-def minhash(expr: IntoExprColumn, *, tokenizer_pattern: str = r'\w+', seed=SEED, buckets=14, bsize=8, window=5) -> pl.Expr:
+
+def minhash(
+    expr: IntoExprColumn,
+    *,
+    tokenizer_pattern: str = r"\w+",
+    seed=SEED,
+    buckets=14,
+    bsize=8,
+    window=5,
+) -> pl.Expr:
     """
     construct a hex representation of the minhash hash of the given text column.
     `tokenizer_pattern`: tokenizer pattern for the word-shingling.
@@ -49,10 +92,19 @@ def minhash(expr: IntoExprColumn, *, tokenizer_pattern: str = r'\w+', seed=SEED,
         plugin_path=LIB,
         function_name="minhash",
         is_elementwise=True,
-        kwargs={'tokenizer_pattern': tokenizer_pattern, 'buckets': buckets, 'bsize': bsize, 'seed': seed, 'window': window},
+        kwargs={
+            "tokenizer_pattern": tokenizer_pattern,
+            "buckets": buckets,
+            "bsize": bsize,
+            "seed": seed,
+            "window": window,
+        },
     )
 
-def repetition_signals(expr: IntoExprColumn, *, tokenizer_pattern: str = r'\w+', num_top=4, num_dup=10) -> pl.Expr:
+
+def repetition_signals(
+    expr: IntoExprColumn, *, tokenizer_pattern: str = r"\w+", num_top=4, num_dup=10
+) -> pl.Expr:
     """
     Runs gopher repetition signals on the given text column.
     Words are extracted using the supplied tokenizer pattern.
@@ -64,19 +116,34 @@ def repetition_signals(expr: IntoExprColumn, *, tokenizer_pattern: str = r'\w+',
         plugin_path=LIB,
         function_name="repetition_signals",
         is_elementwise=True,
-        kwargs={'tokenizer_pattern': tokenizer_pattern, 'num_top': num_top, 'num_dup': num_dup},
+        kwargs={
+            "tokenizer_pattern": tokenizer_pattern,
+            "num_top": num_top,
+            "num_dup": num_dup,
+        },
     )
 
-def scrub(expr: IntoExprColumn, *, patterns: List[str], replacement: str = 'REDACTED') -> pl.Expr:
+
+def scrub(
+    expr: IntoExprColumn, *, patterns: List[str], replacement: str = "REDACTED"
+) -> pl.Expr:
     return register_plugin_function(
         args=[expr],
         plugin_path=LIB,
-        function_name='scrub',
+        function_name="scrub",
         is_elementwise=True,
-        kwargs={'patterns': patterns, 'replacement': replacement}
+        kwargs={"patterns": patterns, "replacement": replacement},
     )
 
-def fasttext(expr: IntoExprColumn, *, path: str, labels: List[str], output_aggregate: bool = True, output_scores: bool = False) -> pl.Expr:
+
+def fasttext(
+    expr: IntoExprColumn,
+    *,
+    path: str,
+    labels: List[str],
+    output_aggregate: bool = True,
+    output_scores: bool = False,
+) -> pl.Expr:
     """
     Runs a fasttext model against the given text column.
     `path` is the path to the fasttext model bin path.
@@ -95,5 +162,10 @@ def fasttext(expr: IntoExprColumn, *, path: str, labels: List[str], output_aggre
         plugin_path=LIB,
         function_name="fasttext",
         is_elementwise=True,
-        kwargs={'path': path, 'labels': labels, 'output_aggregate': output_aggregate, 'output_scores': output_scores},
+        kwargs={
+            "path": path,
+            "labels": labels,
+            "output_aggregate": output_aggregate,
+            "output_scores": output_scores,
+        },
     )
