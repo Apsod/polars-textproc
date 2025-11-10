@@ -3,28 +3,63 @@ use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
 use polars_arrow::bitmap::{Bitmap, MutableBitmap};
 use std::collections::{HashSet, HashMap, VecDeque};
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use fasttext::{FastText};
 use cached::proc_macro::cached;
 use serde::Deserialize;
 use std::sync::Arc;
 use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
-use rand::prelude::{StdRng, RngCore, SeedableRng};
 use itertools::izip;
+use uuid::Uuid;
+
+use rand::Rng;
+use rand::prelude::{StdRng, RngCore, SeedableRng};
+use rand::distr::uniform::{Uniform};
 
 use std::hash::{BuildHasher, Hasher};
 use std::io::Error;
+
+// ####
+// UUID
+// ####
+
+#[polars_expr(output_type=String)]
+fn uuid4(inputs: &[Series]) -> PolarsResult<Series> {
+    let s = &inputs[0];
+    let n = s.len();
+    let mut builder = StringChunkedBuilder::new("id".into(), n);
+    for _ in 0..n {
+        builder.append_value(Uuid::new_v4().simple().to_string());
+    }
+    Ok(builder.finish().into_series())
+}
 
 // #######
 // Minhash
 // #######
 
-const MP_61: u64 = (1<<61) - 1;
-const MP_61_128: u128 = MP_61 as u128;
+const HM: u64 = (1<<32) - 1;
+const MP: u64 = (1 << 61) - 1;
+const MP_128: u128 = MP as u128;
+
+fn mod61(x: u64) -> u64 {
+    let y = (x & MP) + (x >> 61);
+    if y < MP {y} else {y - MP}
+}
+
+fn mod61_128(x: u128) -> u64 {
+    let y = ((x & MP_128) + (x >> 61)) as u64;
+    if y < MP {y} else {y - MP}
+}
+
+fn affine61(a: u64, b: u64, x: u64) -> u64{
+    let y = (a as u128) * (x as u128) + (b as u128);
+    mod61_128(y)
+}
 
 struct MinHash {
-    a: Vec<u128>,
-    b: Vec<u128>,
+    a: Vec<u64>,
+    b: Vec<u64>,
     buckets: usize,
     bsize: usize,
     window: usize,
@@ -37,15 +72,16 @@ macro_rules! into_bytes {
     }
 }
 
-
 impl MinHash {
     fn from_rng(rng: &mut StdRng, buckets: usize, bsize: usize, window: usize) -> Self {
         let hashes = buckets*bsize;
         let mut a = Vec::with_capacity(hashes);
         let mut b = Vec::with_capacity(hashes);
+        let a_dist: Uniform<u64> = Uniform::new(1, MP).unwrap();
+        let b_dist: Uniform<u64> = Uniform::new(0, MP).unwrap();
         for _ in 0..hashes {
-            a.push(1 + (rng.next_u64() % (MP_61-1)) as u128);
-            b.push((rng.next_u64() % MP_61) as u128);
+            a.push(rng.sample(a_dist));
+            b.push(rng.sample(b_dist));
         }
         let hash_builder = Xxh3Builder::new().with_seed(rng.next_u64());
         MinHash {
@@ -66,18 +102,12 @@ impl MinHash {
         Self::from_rng(&mut StdRng::from_seed(seed), buckets, bsize, window)
     }
 
-    fn permute(&self, shingle: u64) -> impl '_ + Iterator<Item=u64> {
-        izip!(self.a.iter(), self.b.iter()).map(move |(ai, bi)| {
-            ((ai * (shingle as u128) + bi) % MP_61_128) as u64
-        })
-    }
-
     fn mk_minhash<'a>(&self, vals: impl Iterator<Item=&'a str>) -> Vec<u64> {
         let mut builder: VecDeque<&str> = VecDeque::with_capacity(self.window+1);
-        let mut minhash: Vec<u64> = vec![u64::MAX; self.hashes()];
-
-        for v in vals {
-            builder.push_front(v);
+        let minhash: &mut [u64] = &mut vec![u64::MAX; self.hashes()][..];
+        //let mut minhash: Vec<u64> = vec![u64::MAX; self.hashes()];
+        vals.filter_map(|w| {
+            builder.push_front(w);
             builder.truncate(self.window);
             if builder.len() == self.window {
                 let mut hasher = self.hash_builder.build_hasher();
@@ -85,13 +115,16 @@ impl MinHash {
                     hasher.update(v.as_bytes());
                     hasher.write_u8(0xff);
                 }
-                let shingle_hash = hasher.digest() % MP_61;
-                izip!(&mut minhash, self.permute(shingle_hash)).for_each(|(mh, sh)| {
-                    *mh = std::cmp::min(*mh, sh)
-                });
+                Some(mod61(hasher.digest()))
+            } else {
+                None
             }
-        }
-        minhash
+        }).for_each(|shingle| {
+            izip!(minhash.iter_mut(), &self.a, &self.b).for_each(|(mh, a, b)| {
+                *mh = std::cmp::min(*mh, affine61(*a, *b, shingle))
+            });
+        });
+        minhash.to_vec()
     }
 
     fn mk_buckets<'a>(&self, vals: impl Iterator<Item=&'a str>) -> Vec<u128> {
@@ -155,10 +188,9 @@ fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usiz
     // It is used to avoid double counting overlapping duplicates.
     // dups[n] counts the number of characters covered by duplicate "n"-grams.
     // tot is the total number of characters seen.
-    let mut last : Vec<usize> = vec![0; num_dup];
-    let mut dups : Vec<usize> = vec![0; num_dup];
+    let last : &mut [usize] = &mut vec![0; num_dup];
+    let dups : &mut [usize] = &mut vec![0; num_dup];
     let mut tot: usize = 0;
-
 
     for (pos, v) in vals.enumerate() {
         let vlen = v.chars().count();
@@ -174,8 +206,7 @@ fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usiz
         // pos = 5
         // i = 1
         // sbuf = [mat, the, on, sat]
-        
-        for (n, (gram, dup)) in izip!(&sbuf, &mut dups).enumerate() {
+        for (n, gram, dup) in izip!(0..sbuf.len(), &sbuf, &mut *dups) {
             lbuf[n] += vlen;
             hasher.update(gram.as_bytes());
             hasher.write_u8(0xff);
@@ -187,6 +218,13 @@ fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usiz
             } else if ! seen.insert(ngram) {
                 // unaccounted is the number of n-gram parts (-1) that should be accounted for
                 // when updating the number of characters covered by duplicate "n"-grams.
+                // For example:
+                // pos = 12
+                // n = 3
+                // last[3] = 10, i.e. we observed a repeated 4(!)-gram at position 10.
+                // unaccouned = min(3, 12 - 10 - 1): 1
+                // lbuf[unaccounted] = lbuf[1], i.e. the length of the rightmost
+                // two-gram (corresponding to positions 11, 12)
                 let unaccounted: usize = std::cmp::min(n, pos - last[n] - 1);
                 *dup += lbuf[unaccounted];
                 last[n] = pos;
@@ -197,7 +235,7 @@ fn dup_ngrams_hash<'a>(hash_builder: &Xxh3Builder, num_top: usize, num_dup: usiz
     // Hack to deal with division by zero.
     // tot = 0 => all dups = 0.
     let tot = std::cmp::max(1, tot); 
-    dups.into_iter().map(|dup| ratio(dup, tot)).collect()
+    dups.into_iter().map(|dup| ratio(*dup, tot)).collect()
 }
 
 fn fieldname(num_top: usize, num_dup: usize, i: usize) -> String {
@@ -277,6 +315,103 @@ fn repetition_signals(inputs: &[Series], kwargs: RepetitionKwargs) -> PolarsResu
         ca.len(),
         res.iter(),
         ).map(|x| x.into_series())
+}
+
+// ###############
+// Regexp scrubber
+// ###############
+
+
+//fn fuse_bounds(bounds: impl Iterator<Item=(usize, usize)>) -> impl Iterator<Item=(usize, usize)> {
+//    bounds.fold(BTreeMap::new(), |mut acc, (start, stop)| {
+//        let mut middle = acc.split_off(&start);
+//        let mut tail = middle.split_off(&(stop+1));
+//        // acc:    Tree with keys in (..., start)
+//        // middle: Tree with keys in [start, stop]
+//        // tail:   Tree with (start, ...)
+//        // acc always contain non-overlapping spans.
+//
+//        let mut start = start;
+//        let mut stop = stop;
+//
+//        acc.last_entry().map(|entry| {
+//            if *entry.get() >= start {
+//                let (other_start, other_stop) = entry.remove_entry();
+//                start = other_start;
+//                stop = stop.max(other_stop);
+//            }
+//        });
+//
+//        if let Some(entry) = middle.last_entry() {
+//            stop = stop.max(*entry.get());
+//        }
+//        
+//        acc.insert(start, stop);
+//        acc.append(&mut tail);
+//        acc
+//    }).into_iter()
+//}
+
+fn fuse_bounds(bounds: impl Iterator<Item=(usize, usize)>) -> impl Iterator<Item=(usize, usize)> {
+    let mut bounds: Vec<(usize, usize)> = bounds.collect();
+    if bounds.is_empty() {
+        Vec::new().into_iter()
+    } else {
+        bounds.sort_unstable_by_key(|k| k.0);
+
+        let mut merged = Vec::with_capacity(bounds.len());
+        let mut current_merge = bounds[0];
+
+        for &(next_start, next_stop) in &bounds[1..]{
+            if next_start <= current_merge.1 {
+                current_merge.1 = current_merge.1.max(next_stop);
+            } else {
+                merged.push(current_merge);
+                current_merge = (next_start, next_stop);
+            }
+        }
+        merged.push(current_merge);
+        merged.into_iter()
+    }
+}
+
+#[derive(Deserialize)]
+struct ScrubKwargs{
+    patterns: Vec<String>,
+    replacement: String,
+}
+
+#[polars_expr(output_type=String)]
+fn scrub(inputs: &[Series], kwargs: ScrubKwargs) -> PolarsResult<Series> {
+    let ca: &StringChunked = inputs[0].str()?;
+    let replacement = kwargs.replacement;
+    let pattern_set = RegexSet::new(kwargs.patterns)?;
+    let patterns: Vec<Regex> = pattern_set
+        .patterns()
+        .iter()
+        .map(|pat| Regex::new(pat).unwrap())
+        .collect();
+
+    let out = ca.apply_into_string_amortized(|txt: &str, res: &mut String| {
+        let bounds = pattern_set
+            .matches(&txt)
+            .into_iter()
+            .map(|index| &patterns[index])
+            .flat_map(|pattern| {
+                pattern.find_iter(&txt).map(move |m| (m.start(), m.end()))
+            });
+
+        let mut last_stop = 0;
+        for (start, stop) in fuse_bounds(bounds) {
+            res.push_str(&txt[last_stop..start]);
+            res.push_str(&replacement);
+            last_stop = stop;
+        }
+        res.push_str(&txt[last_stop..]);
+
+    });
+
+    Ok(out.into_series())
 }
 
 // #################

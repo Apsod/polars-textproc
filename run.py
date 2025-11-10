@@ -1,6 +1,6 @@
 import polars as pl
 import polars_textproc
-from polars_textproc import repetition_signals, fasttext, minhash
+from polars_textproc import repetition_signals, fasttext, minhash, scrub, uuid4
 
 print(polars_textproc.__version__)
 
@@ -49,10 +49,18 @@ bsize = 8
 hashes = buckets * bsize
 lf = df.lazy()
 
-lf = lf.with_columns(norm = normalized, repetition=repetition_signals(normalized, tokenizer_pattern=r'.'), langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), minhash=minhash(normalized, buckets=buckets, bsize=bsize))
+lf = lf.with_columns(
+    id = uuid4(pl.first()),
+    norm = normalized, 
+    repetition=repetition_signals(normalized, tokenizer_pattern=r'.'), 
+    langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), 
+    minhash=minhash(normalized, buckets=buckets, bsize=bsize),
+    redacted=scrub('text', patterns=[r'\bE\w*\b']),
+)
 lf = lf.with_columns([pl.col('minhash').str.slice(i*bsize_str, bsize_str).alias(f'bucket_{i}') for i in range(buckets)])
 df = lf.collect()
 print(df)
 print(df[0, 'bucket_0'])
 print(df[0, 'bucket_13'])
 print(df[0, 'minhash'])
+print(df[:, 'redacted'])

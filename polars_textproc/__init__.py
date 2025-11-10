@@ -15,6 +15,14 @@ LIB = Path(__file__).parent
 
 SEED = [179, 28, 18, 84, 75, 144, 79, 252, 138, 70, 118, 68, 23, 234, 55, 243, 220, 195, 42, 178, 73, 192, 91, 161, 228, 176, 67, 210, 33, 75, 126, 56]
 
+def uuid4(expr: IntoExprColumn) -> pl.Expr:
+    return register_plugin_function(
+            args=[expr],
+            plugin_path=LIB,
+            function_name='uuid4',
+            is_elementwise=True,
+    )
+
 def minhash(expr: IntoExprColumn, *, tokenizer_pattern: str = r'\w+', seed=SEED, buckets=14, bsize=8, window=5) -> pl.Expr:
     """
     construct a hex representation of the minhash hash of the given text column.
@@ -57,6 +65,15 @@ def repetition_signals(expr: IntoExprColumn, *, tokenizer_pattern: str = r'\w+',
         function_name="repetition_signals",
         is_elementwise=True,
         kwargs={'tokenizer_pattern': tokenizer_pattern, 'num_top': num_top, 'num_dup': num_dup},
+    )
+
+def scrub(expr: IntoExprColumn, *, patterns: List[str], replacement: str = 'REDACTED') -> pl.Expr:
+    return register_plugin_function(
+        args=[expr],
+        plugin_path=LIB,
+        function_name='scrub',
+        is_elementwise=True,
+        kwargs={'patterns': patterns, 'replacement': replacement}
     )
 
 def fasttext(expr: IntoExprColumn, *, path: str, labels: List[str], output_aggregate: bool = True, output_scores: bool = False) -> pl.Expr:
