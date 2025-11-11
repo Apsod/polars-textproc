@@ -1,6 +1,6 @@
 [package]
 name = "polars_textproc"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 
 [lib]
@@ -8,12 +8,12 @@ name = "polars_textproc"
 crate-type= ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.23.4", features = ["extension-module", "abi3-py38"] }
-pyo3-polars = { version = "0.20.0", features = ["derive", "dtype-array"] }
+pyo3 = { version = "0.25.0", features = ["extension-module", "abi3-py38"] }
+pyo3-polars = { version = "0.24.0", features = ["derive", "dtype-array"] }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1.18.1", features = ["v4"] }
-polars = { version = "0.46.0", features = ["dtype-struct", "dtype-array"], default-features = false }
-polars-arrow = { version = "0.46.0" }
+polars = { version = "0.51.0", features = ["dtype-struct", "dtype-array", "dtype-u8"], default-features = false }
+polars-arrow = { version = "0.51.0" }
 regex = { version = "1.11.1" }
 fasttext = { version = "0.7.8" }
 cached = { version = "0.54.0" }

@@ -49,6 +49,15 @@ SEED = [
 ]
 
 
+def samplebyte(expr: IntoExprColumn) -> pl.Expr:
+    return register_plugin_function(
+        args=[expr],
+        plugin_path=LIB,
+        function_name="samplebyte",
+        is_elementwise=True,
+    )
+
+
 def uuid4(expr: IntoExprColumn) -> pl.Expr:
     return register_plugin_function(
         args=[expr],

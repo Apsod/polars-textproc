@@ -11,12 +11,34 @@ use polars::prelude::*;
 use polars_arrow::bitmap::{Bitmap, MutableBitmap};
 use pyo3_polars::derive::polars_expr;
 use rand::distr::uniform::Uniform;
+use rand::distr::StandardUniform;
 use rand::prelude::{RngCore, SeedableRng, StdRng};
 use rand::Rng;
 use regex::{Regex, RegexSet};
 use serde::Deserialize;
 use uuid::Uuid;
 use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
+
+// ##########
+// SampleByte
+// ##########
+
+#[polars_expr(output_type=UInt8)]
+fn samplebyte(inputs: &[Series]) -> PolarsResult<Series> {
+    let s = &inputs[0];
+    let n = s.len();
+    let mut rng = rand::rng();
+    let mut builder = PrimitiveChunkedBuilder::<UInt8Type>::new(s.name().clone(), n);
+    for _ in 0..n {
+        let val: u64 = rng.sample(StandardUniform);
+        if val.is_power_of_two() {
+            builder.append_value((val.leading_zeros() + 1) as u8);
+        } else {
+            builder.append_value(val.leading_zeros() as u8);
+        }
+    }
+    Ok(builder.finish().into_series())
+}
 
 // ####
 // UUID
@@ -26,7 +48,7 @@ use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
 fn uuid4(inputs: &[Series]) -> PolarsResult<Series> {
     let s = &inputs[0];
     let n = s.len();
-    let mut builder = StringChunkedBuilder::new("id".into(), n);
+    let mut builder = StringChunkedBuilder::new(s.name().clone(), n);
     for _ in 0..n {
         builder.append_value(Uuid::new_v4().simple().to_string());
     }

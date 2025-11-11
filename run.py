@@ -1,6 +1,6 @@
 import polars as pl
 import polars_textproc
-from polars_textproc import repetition_signals, fasttext, minhash, scrub, uuid4
+from polars_textproc import repetition_signals, fasttext, minhash, scrub, uuid4, samplebyte
 
 print(polars_textproc.__version__)
 
@@ -51,6 +51,7 @@ lf = df.lazy()
 
 lf = lf.with_columns(
     id = uuid4(pl.first()),
+    samplebyte = samplebyte(pl.first()),
     norm = normalized, 
     repetition=repetition_signals(normalized, tokenizer_pattern=r'.'), 
     langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), 
