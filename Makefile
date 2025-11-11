@@ -1,29 +1,27 @@
 SHELL=/bin/bash
 
 venv:
-	python3 -m venv .venv
-	.venv/bin/pip install -r requirements.txt
+	uv sync
 
 install:
-	unset CONDA_PREFIX && \
-	source .venv/bin/activate && maturin develop
+	uv run maturin develop
 
 install-release:
-	unset CONDA_PREFIX && \
-	source .venv/bin/activate && maturin develop --release
+	uv run maturin develop --release
 
 pre-commit:
 	cargo +nightly fmt --all && cargo clippy --all-features
-	.venv/bin/python -m ruff check . --fix --exit-non-zero-on-fix
-	.venv/bin/python -m ruff format polars_textproc tests
-	.venv/bin/mypy polars_textproc tests
+	uv run python -m ruff check . --fix --exit-non-zero-on-fix
+	uv run python -m ruff format polars_textproc tests
+	uv run mypy polars_textproc tests
 
 test:
+	uv run python -m pytest tests
 	.venv/bin/python -m pytest tests
 
 run: install
-	source .venv/bin/activate && python run.py
+	uv run run.py
 
 run-release: install-release
-	source .venv/bin/activate && python run.py
+	uv run run.py
 
