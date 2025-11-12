@@ -1,7 +1,7 @@
 SHELL=/bin/bash
 
 venv:
-	uv sync
+	uv venv
 
 install:
 	uv run maturin develop

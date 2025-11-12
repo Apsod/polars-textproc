@@ -47,6 +47,7 @@ jobs:
           version: "0.9.8"
       - name: Set up Rust
         run: rustup show
+        run: rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
       - uses: mozilla-actions/sccache-action@v0.0.6
       - run: make venv
       - run: make pre-commit
@@ -73,7 +74,7 @@ jobs:
           version: "0.9.8"
       - uses: mozilla-actions/sccache-action@v0.0.6
       - run: make venv
-      - run: .venv/bin/python -m pip install polars==1.3.0  # min version
+      - run: uv pip install polars==1.3.0
       - run: make install
       - run: make test
 
