@@ -48,6 +48,35 @@ SEED = [
     56,
 ]
 
+def compressed_size(
+        expr: IntoExprColumn,
+        *,
+        level: int = 6) -> pl.Expr:
+    assert 0 <= level <= 9, 'compression level must be between 0 and 9, not '
+    return register_plugin_function(
+        args=[expr],
+        plugin_path=LIB,
+        function_name="compressed_size",
+        is_elementwise=True,
+        kwargs={
+            "level": level,
+        },
+    )
+
+def compression_ratio(
+        expr: IntoExprColumn,
+        *,
+        level: int = 6) -> pl.Expr:
+    assert 0 <= level <= 9, 'compression level must be between 0 and 9, not '
+    return register_plugin_function(
+        args=[expr],
+        plugin_path=LIB,
+        function_name="compression_ratio",
+        is_elementwise=True,
+        kwargs={
+            "level": level,
+        },
+    )
 
 def samplebyte(expr: IntoExprColumn) -> pl.Expr:
     return register_plugin_function(

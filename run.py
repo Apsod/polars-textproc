@@ -1,6 +1,6 @@
 import polars as pl
 import polars_textproc
-from polars_textproc import repetition_signals, fasttext, minhash, scrub, uuid4, samplebyte
+from polars_textproc import repetition_signals, fasttext, minhash, scrub, uuid4, samplebyte, compression_ratio, compressed_size
 
 print(polars_textproc.__version__)
 
@@ -32,9 +32,13 @@ repetetive = """\
 This is a very repetetive text that is very repetetive and a text
 """ * 10
 
+empty = ""
+
+single = "a"
+
 df = pl.DataFrame({
-    "text": [english, swedish, interlingua, interlingua2, None, repetetive], 
-    "num" : [1, 2, 3, 4, 5, 6],
+    "text": [english, swedish, interlingua, interlingua2, None, repetetive, empty, single], 
+    "num" : [1, 2, 3, 4, 5, 6, 7, 8],
     })
 
 bsize_str = 2 * 128//8
@@ -57,6 +61,8 @@ lf = lf.with_columns(
     langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), 
     minhash=minhash(normalized, buckets=buckets, bsize=bsize),
     redacted=scrub('text', patterns=[r'\bE\w*\b']),
+    compression_ratio=compression_ratio('text'),
+    compressed_size=compressed_size('text'),
 )
 lf = lf.with_columns([pl.col('minhash').str.slice(i*bsize_str, bsize_str).alias(f'bucket_{i}') for i in range(buckets)])
 df = lf.collect()
@@ -65,3 +71,4 @@ print(df[0, 'bucket_0'])
 print(df[0, 'bucket_13'])
 print(df[0, 'minhash'])
 print(df[:, 'redacted'])
+print(df.select('compression_ratio', 'compressed_size', pl.col('text').str.len_bytes()))

@@ -15,6 +15,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 polars = { version = "0.51.0", features = ["dtype-struct", "dtype-array", "dtype-u8"], default-features = false }
 polars-arrow = { version = "0.51.0" }
 regex = { version = "1.11.1" }
+flate2 = { version = "1.1.9" }
 fasttext = { version = "0.7.8" }
 cached = { version = "0.54.0" }
 xxhash-rust = "0.8.15"
