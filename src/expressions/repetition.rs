@@ -1,11 +1,12 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{BuildHasher, Hasher};
+
 use itertools::izip;
 use polars::prelude::*;
 use polars_arrow::bitmap::{Bitmap, MutableBitmap};
 use pyo3_polars::derive::polars_expr;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{BuildHasher, Hasher};
 use xxhash_rust::xxh3::Xxh3Builder;
 
 fn ratio(num: usize, den: usize) -> f32 {

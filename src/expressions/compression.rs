@@ -1,9 +1,10 @@
+use std::io::Write;
+
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
 use serde::Deserialize;
-use std::io::Write;
 
 struct CountingSink {
     count: usize,

@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::io::Error;
+use std::sync::Arc;
+
 use cached::proc_macro::cached;
 use fasttext::FastText;
 use polars::prelude::*;
@@ -5,9 +9,6 @@ use polars_arrow::bitmap::{Bitmap, MutableBitmap};
 use pyo3_polars::derive::polars_expr;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::io::Error;
-use std::sync::Arc;
 
 #[cached(time = 60, time_refresh = true, sync_writes = true)]
 fn load_model(path: String) -> Result<Arc<FastText>, String> {

@@ -1,3 +1,6 @@
+use std::collections::VecDeque;
+use std::hash::{BuildHasher, Hasher};
+
 use itertools::izip;
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
@@ -6,8 +9,6 @@ use rand::prelude::{RngCore, SeedableRng, StdRng};
 use rand::Rng;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::VecDeque;
-use std::hash::{BuildHasher, Hasher};
 use xxhash_rust::xxh3::{xxh3_128, Xxh3Builder};
 
 const MP: u64 = (1 << 61) - 1;
@@ -24,7 +25,11 @@ fn mod61(x: u64) -> u64 {
 
 fn mod61_128(x: u128) -> u64 {
     let y = ((x & MP_128) + (x >> 61)) as u64;
-    if y < MP { y } else { y - MP }
+    if y < MP {
+        y
+    } else {
+        y - MP
+    }
 }
 
 fn affine61(a: u64, b: u64, x: u64) -> u64 {
