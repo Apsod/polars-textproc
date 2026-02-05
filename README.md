@@ -21,6 +21,6 @@ With `output_aggregate=False`, `top_label`, `top_score`, and `total_score` will 
 
 `polars_textproc.compressed_size(expr, level=6)` returns the compressed size in bytes (deflate, excluding the 2-byte zlib header).
 
-`polars_textproc.samplebyte(expr)` returns a random `UInt8` per row (derived from a random 64-bit sample), such that the probability of that byte being x is 2^(-x-1).
+`polars_textproc.samplebyte(expr)` returns a random `UInt8` per row (derived from a random 64-bit sample), such that the probability of that byte being x is 2^(-x).
 
 `polars_textproc.uuid4(expr)` returns a random UUID v4 string per row.
