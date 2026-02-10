@@ -1,6 +1,12 @@
 import polars as pl
 import polars_textproc
-from polars_textproc import repetition_signals, fasttext, minhash, scrub, uuid4, samplebyte, compression_ratio, compressed_size
+from polars_textproc import repetition_signals, minhash, scrub, uuid4, samplebyte, compression_ratio
+
+from tokenizers import Tokenizer
+
+tokenizer = Tokenizer.from_pretrained('bert-base-cased')
+
+print(tokenizer)
 
 print(polars_textproc.__version__)
 
@@ -53,16 +59,19 @@ bsize = 8
 hashes = buckets * bsize
 lf = df.lazy()
 
+text = pl.col('text')
+
 lf = lf.with_columns(
     id = uuid4(pl.first()),
     samplebyte = samplebyte(pl.first()),
     norm = normalized, 
     repetition=repetition_signals(normalized, tokenizer_pattern=r'.'), 
-    langid=fasttext("text", path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), 
+    langid=text.textproc.fasttext(path="model.bin", labels=["__label__swe_Latn", "__label__eng_Latn"]), 
     minhash=minhash(normalized, buckets=buckets, bsize=bsize),
     redacted=scrub('text', patterns=[r'\bE\w*\b']),
     compression_ratio=compression_ratio('text'),
-    compressed_size=compressed_size('text'),
+    compressed_size=text.textproc.compressed_size(),
+    tokenized=text.textproc.tokenize(tokenizer=tokenizer),
 )
 lf = lf.with_columns([pl.col('minhash').str.slice(i*bsize_str, bsize_str).alias(f'bucket_{i}') for i in range(buckets)])
 df = lf.collect()
@@ -72,3 +81,5 @@ print(df[0, 'bucket_13'])
 print(df[0, 'minhash'])
 print(df[:, 'redacted'])
 print(df.select('compression_ratio', 'compressed_size', pl.col('text').str.len_bytes()))
+print(df.select('repetition').unnest('repetition'))
+print(df.select('tokenized'))

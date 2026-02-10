@@ -13,14 +13,24 @@ The returned values can be controlled with `output_aggregate` (default: `True`),
 With `output_scores=True`, the score for all supplied labels will be returned (with the label as the struct field name). 
 With `output_aggregate=False`, `top_label`, `top_score`, and `total_score` will not be returned.
 
-`polars_textproc.minhash(expr, tokenizer_pattern=r"\w+", seed=SEED, buckets=14, bsize=8, window=5)` constructs a hex minhash signature of each text value. By default it produces `buckets` 128-bit bucket hashes (hex-encoded as a `buckets*32`-byte string). If `bsize=1`, it emits raw 64-bit hashes (hex-encoded as a `buckets*16`-byte string).
+`polars_textproc.minhash(expr, tokenizer_pattern=r"\w+", seed=SEED, buckets=14, bsize=8, window=5)` constructs a hex minhash signature of each text 
+value. By default it produces `buckets` 128-bit bucket hashes (hex-encoded as a `buckets*32`-byte string). If `bsize=1`, it emits raw 64-bit hashes 
+(hex-encoded as a `buckets*16`-byte string).
 
-`polars_textproc.scrub(expr, patterns, replacement="REDACTED")` replaces all matches of the given regex patterns with the replacement string. Overlapping matches are merged. Regexes use the Rust `regex` crate.
+`polars_textproc.scrub(expr, patterns, replacement="REDACTED")` replaces all matches of the given regex patterns with the replacement string.
+Overlapping matches are merged. Regexes use the Rust `regex` crate.
 
 `polars_textproc.compression_ratio(expr, level=6)` returns `original_size / compressed_size` using deflate compression at the given level.
 
 `polars_textproc.compressed_size(expr, level=6)` returns the compressed size in bytes (deflate, excluding the 2-byte zlib header).
 
-`polars_textproc.samplebyte(expr)` returns a random `UInt8` per row (derived from a random 64-bit sample), such that the probability of that byte being x is 2^(-x).
+`polars_textproc.samplebyte(expr)` returns a random `UInt8` per row (derived from a random 64-bit sample), such that the probability of that byte being exactly x is 2^(-x) for x > 0.
 
 `polars_textproc.uuid4(expr)` returns a random UUID v4 string per row.
+
+`polars_textproc.tokenize(expr, tokenizer)` returns the tokenization of the text in expr, using the supplied tokenizer. 
+The tokenizer can be supplied either as a path to a json dump of a `tokenizers.Tokenizer`, or as a `tokenizers.Tokenizer`.
+
+The plugin can also be imported as a polars expression namespace using
+`import polars_textproc.namespace as _`, which registers the namespace `textproc`, and enables calling the function that way,
+e.g. `lf.select(pl.col('text').textproc.minhash())`

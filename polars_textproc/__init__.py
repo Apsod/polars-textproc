@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
+from tokenizers import Tokenizer
+
 import polars as pl
 from polars.plugins import register_plugin_function
 
 from polars_textproc._internal import __version__ as __version__
+
 
 if TYPE_CHECKING:
     from polars_textproc.typing import IntoExprColumn
@@ -47,6 +50,27 @@ SEED = [
     126,
     56,
 ]
+
+
+def tokenize(expr: IntoExprColumn, *, tokenizer: Tokenizer | str) -> pl.Expr:
+    if isinstance(tokenizer, Tokenizer):
+        kwargs = {"payload": tokenizer.to_str(), "is_path": False}
+    elif isinstance(tokenizer, str):
+        kwargs = {
+            "payload": tokenizer,
+            "is_path": True,
+        }
+    else:
+        raise ValueError(
+            f"tokenizer must be str or Tokenizer instance, found: {type(tokenizer)}"
+        )
+    return register_plugin_function(
+        args=[expr],
+        plugin_path=LIB,
+        function_name="tokenize",
+        is_elementwise=True,
+        kwargs=kwargs,
+    )
 
 
 def compressed_size(expr: IntoExprColumn, *, level: int = 6) -> pl.Expr:

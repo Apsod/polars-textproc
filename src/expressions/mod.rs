@@ -6,3 +6,4 @@ mod minhash;
 mod misc;
 mod repetition;
 mod scrub;
+mod tokenize;
