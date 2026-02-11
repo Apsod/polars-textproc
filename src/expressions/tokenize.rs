@@ -1,6 +1,7 @@
 use std::io::Error;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cached::proc_macro::cached;
 use polars::prelude::*;
@@ -8,14 +9,14 @@ use pyo3_polars::derive::polars_expr;
 use serde::Deserialize;
 use tokenizers::tokenizer::Tokenizer;
 
-#[cached(time = 60, time_refresh = true, sync_writes = true)]
+#[cached(time = 60, time_refresh = true, sync_writes = "by_key")]
 fn tok_from_file(path: String) -> Result<Arc<Tokenizer>, String> {
     let tok = Tokenizer::from_file(&path)
         .map_err(|_| format!("Error loading tokenizer from path: {}", &path))?;
     Ok(Arc::new(tok))
 }
 
-#[cached(time = 60, time_refresh = true, sync_writes = true)]
+#[cached(time = 60, time_refresh = true, sync_writes = "by_key")]
 fn tok_from_str(payload: String) -> Result<Arc<Tokenizer>, String> {
     let tok = Tokenizer::from_str(&payload)
         .map_err(|_| format!("Error loading tokenizer from string: {}", &payload))?;

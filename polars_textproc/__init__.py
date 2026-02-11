@@ -10,7 +10,6 @@ from polars.plugins import register_plugin_function
 
 from polars_textproc._internal import __version__ as __version__
 
-
 if TYPE_CHECKING:
     from polars_textproc.typing import IntoExprColumn
 
@@ -228,3 +227,103 @@ def fasttext(
             "output_scores": output_scores,
         },
     )
+
+
+def register_namespace(name="textproc"):
+    @pl.api.register_expr_namespace(name)
+    class TextprocNamespace:
+        def __init__(self, expr: pl.Expr) -> None:
+            self._expr = expr
+
+        def normalize(
+            self,
+            *,
+            form=None,
+            lowercase=False,
+            only_script=False,
+            remove_newlines=False,
+            contract_whitespace=False,
+        ) -> pl.Expr:
+            expr = self._expr
+            if form:
+                expr = expr.str.normalize(form=form)
+            if lowercase:
+                expr = expr.str.to_lowercase()
+            if only_script:
+                expr = expr.str.replace_all(r"[\W&&\S]+", " ")
+            if remove_newlines:
+                expr = expr.str.replace_all(r"\n", " ")
+            if contract_whitespace:
+                expr = expr.str.replace_all(r"[\s--\n]+", " ")
+            return expr
+
+        def compressed_size(self, *, level: int = 6) -> pl.Expr:
+            return compressed_size(self._expr, level=level)
+
+        def compression_ratio(self, *, level: int = 6) -> pl.Expr:
+            return compression_ratio(self._expr, level=level)
+
+        def samplebyte(self) -> pl.Expr:
+            return samplebyte(self._expr)
+
+        def uuid4(self) -> pl.Expr:
+            return uuid4(self._expr)
+
+        def tokenize(self, *, tokenizer: Tokenizer | str) -> pl.Expr:
+            return tokenize(self._expr, tokenizer=tokenizer)
+
+        def minhash(
+            self,
+            *,
+            tokenizer_pattern: str = r"\w+",
+            seed=SEED,
+            buckets=14,
+            bsize=8,
+            window=5,
+        ) -> pl.Expr:
+            return minhash(
+                self._expr,
+                tokenizer_pattern=tokenizer_pattern,
+                seed=seed,
+                buckets=buckets,
+                bsize=bsize,
+                window=window,
+            )
+
+        def repetition_signals(
+            self,
+            *,
+            tokenizer_pattern: str = r"\w+",
+            num_top=4,
+            num_dup=10,
+        ) -> pl.Expr:
+            return repetition_signals(
+                self._expr,
+                tokenizer_pattern=tokenizer_pattern,
+                num_top=num_top,
+                num_dup=num_dup,
+            )
+
+        def scrub(
+            self,
+            *,
+            patterns: List[str],
+            replacement: str = "REDACTED",
+        ) -> pl.Expr:
+            return scrub(self._expr, patterns=patterns, replacement=replacement)
+
+        def fasttext(
+            self,
+            *,
+            path: str,
+            labels: List[str],
+            output_aggregate: bool = True,
+            output_scores: bool = False,
+        ) -> pl.Expr:
+            return fasttext(
+                self._expr,
+                path=path,
+                labels=labels,
+                output_aggregate=output_aggregate,
+                output_scores=output_scores,
+            )

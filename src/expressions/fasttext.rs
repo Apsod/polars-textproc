@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::Error;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cached::proc_macro::cached;
 use fasttext::FastText;
@@ -10,7 +11,7 @@ use pyo3_polars::derive::polars_expr;
 use regex::Regex;
 use serde::Deserialize;
 
-#[cached(time = 60, time_refresh = true, sync_writes = true)]
+#[cached(time = 60, time_refresh = true, sync_writes = "by_key")]
 fn load_model(path: String) -> Result<Arc<FastText>, String> {
     let mut model = FastText::new();
     model.load_model(&path)?;

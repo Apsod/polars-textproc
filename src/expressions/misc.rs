@@ -1,6 +1,6 @@
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
-use rand::RngCore;
+use rand::Rng;
 use uuid::Uuid;
 
 #[polars_expr(output_type = UInt8)]

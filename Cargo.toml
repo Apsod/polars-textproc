@@ -8,18 +8,18 @@ name = "polars_textproc"
 crate-type= ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.25.0", features = ["extension-module", "abi3-py38"] }
-pyo3-polars = { version = "0.24.0", features = ["derive", "dtype-array"] }
+pyo3 = { version = "0.27.0", features = ["extension-module", "abi3-py38"] }
+pyo3-polars = { version = "0.26.0", features = ["derive", "dtype-array"] }
 serde = { version = "1", features = ["derive"] }
-uuid = { version = "1.18.1", features = ["v4"] }
-polars = { version = "0.51.0", features = ["dtype-struct", "dtype-array", "dtype-u8"], default-features = false }
-polars-arrow = { version = "0.51.0" }
-regex = { version = "1.11.1" }
+uuid = { version = "1.20.0", features = ["v4"] }
+polars = { version = "0.53.0", features = ["dtype-struct", "dtype-array", "dtype-u8"], default-features = false }
+polars-arrow = { version = "0.53.0" }
+regex = { version = "1.12.3" }
 flate2 = { version = "1.1.9" }
 fasttext = { version = "0.7.8" }
-cached = { version = "0.54.0" }
+cached = { version = "0.56.0" }
 xxhash-rust = "0.8.15"
-rand = "0.9.0"
+rand = "0.10.0"
 hex = "0.4.3"
 itertools = "0.14.0"
 tokenizers = {version = "0.22.2", features = ["esaxx_fast", "onig"], default-features = false}

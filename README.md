@@ -1,6 +1,7 @@
-# ccstuff
+# TextProc
 
-Polars plugins to apply gopher repetetition penalties and fasttext classifiers to text data.
+This is a polars plugin to enable various standard text processing algorithms in polars, including gopher repetition signals, minhash calculation,
+fasttext classifiers, and tokenization.
 
 `polars_textproc.repetition_signals(expr)` applies the gopher repetetition signals to each text in the given `expr` (e.g. a dataframe column).
 Returns a struct containing `top_1_gram_char_ratio`, ... `top_4_gram_char_ratio`, `dup_5_gram_char_ratio` ... `dup_10_gram_char_ratio`.
@@ -14,8 +15,10 @@ With `output_scores=True`, the score for all supplied labels will be returned (w
 With `output_aggregate=False`, `top_label`, `top_score`, and `total_score` will not be returned.
 
 `polars_textproc.minhash(expr, tokenizer_pattern=r"\w+", seed=SEED, buckets=14, bsize=8, window=5)` constructs a hex minhash signature of each text 
-value. By default it produces `buckets` 128-bit bucket hashes (hex-encoded as a `buckets*32`-byte string). If `bsize=1`, it emits raw 64-bit hashes 
-(hex-encoded as a `buckets*16`-byte string).
+given by expr. It produces `window`-shingles of the extracted tokens, as specified by `tokenizer_pattern`, and hashes each shingle into `buckets * bsize`
+hashes.
+If `bsize>1`, the final minhashes are themselves hashed into 128-bit bucket hashes and returned as a hex encoded `buckets*32`-byte string. 
+If `bsize=1`, it returns the raw 64-bit minhashes hex encoded as a `buckets*16`-byte string. 
 
 `polars_textproc.scrub(expr, patterns, replacement="REDACTED")` replaces all matches of the given regex patterns with the replacement string.
 Overlapping matches are merged. Regexes use the Rust `regex` crate.
@@ -31,6 +34,6 @@ Overlapping matches are merged. Regexes use the Rust `regex` crate.
 `polars_textproc.tokenize(expr, tokenizer)` returns the tokenization of the text in expr, using the supplied tokenizer. 
 The tokenizer can be supplied either as a path to a json dump of a `tokenizers.Tokenizer`, or as a `tokenizers.Tokenizer`.
 
-The plugin can also be imported as a polars expression namespace using
-`import polars_textproc.namespace as _`, which registers the namespace `textproc`, and enables calling the function that way,
-e.g. `lf.select(pl.col('text').textproc.minhash())`
+The plugin can also be registered as a namespace using `polars_textproc.register_namespace(name='textproc')`,  
+which registers the polars expression namespace `textproc`, and enables calling the function that way,
+e.g. `lf.select(pl.col('text').str.to_lowercase().textproc.minhash())`.

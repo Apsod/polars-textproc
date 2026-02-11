@@ -1,15 +1,11 @@
 import polars as pl
-import polars_textproc
-from polars_textproc import repetition_signals, minhash, scrub, uuid4, samplebyte, compression_ratio
-import polars_textproc.namespace as _
+from polars_textproc import repetition_signals, minhash, scrub, uuid4, samplebyte, compression_ratio, register_namespace
 
 from tokenizers import Tokenizer
 
 tokenizer = Tokenizer.from_pretrained('bert-base-cased')
 
-print(tokenizer)
-
-print(polars_textproc.__version__)
+register_namespace()
 
 HEAD = 10_000
 english = """\
@@ -54,7 +50,7 @@ def minhash_buckets(col, buckets, bsize):
     hashes = minhash(col, hashes=buckets*bsize)
     return [hashes.str.slice(i*bsize_str, bsize_str).alias(f'bucket_{i}') for i in range(buckets)]
 
-normalized = pl.col('text').str.to_lowercase().str.replace_all(r'\W', ' ').str.replace_all(r'\s+', ' ')
+normalized = pl.col('text').textproc.normalize(form='NFC', lowercase=True, only_script=True, remove_newlines=True, contract_whitespace=True)
 buckets = 14
 bsize = 8
 hashes = buckets * bsize
@@ -84,3 +80,4 @@ print(df[:, 'redacted'])
 print(df.select('compression_ratio', 'compressed_size', pl.col('text').str.len_bytes()))
 print(df.select('repetition').unnest('repetition'))
 print(df.select('tokenized'))
+print(df.select('norm')[0, 0])
