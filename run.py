@@ -1,6 +1,7 @@
 import polars as pl
 import polars_textproc
 from polars_textproc import repetition_signals, minhash, scrub, uuid4, samplebyte, compression_ratio
+import polars_textproc.namespace as _
 
 from tokenizers import Tokenizer
 
